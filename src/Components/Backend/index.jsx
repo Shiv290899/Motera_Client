@@ -6,12 +6,9 @@ import Bookings from '../Bookings'
 import Quotations from '../Quotations'
 import Jobcards from '../Jobcards'
 import Branches from '../Admin/Branches'
-import Announcements from '../Announcements'
-import useAnnouncementBadge from '../../hooks/useAnnouncementBadge'
 import Users from '../Admin/Users'
 import VehicleSearch from '../VehicleSearch'
 import VehicleCatalogManager from '../VehicleCatalogManager'
-// Announcements tab/banner removed as requested
 
 // Owner dashboard: Analytics & Reports in tabs
 export default function Backend() {
@@ -29,11 +26,6 @@ export default function Backend() {
   
 
 
-  const { hasNew, latestItem } = useAnnouncementBadge()
-  const pillColor = (t) => (t === 'alert' ? '#fa541c' : t === 'warning' ? '#faad14' : '#2f54eb')
-  const NewPill = () => hasNew ? (
-    <span style={{ marginLeft:6, padding:'0 6px', borderRadius:10, fontSize:11, color:'#fff', fontWeight:700, background:pillColor(latestItem?.type), display:'inline-block', animation:'annPulse 1.6s ease-in-out infinite' }}>NEW</span>
-  ) : null
   const items = [
     // 1) Quotation (form), 2) Quotations (list), 3) Job Cards, 4) Bookings
     { key: 'quotations', label: 'Quotations', children: <Quotations /> },
@@ -44,10 +36,9 @@ export default function Backend() {
     // 4) Stock Update, 5) In-Stock Update
    { key: 'stock', label: 'Stock Movements', children: <StockUpdate /> },
        { key: 'instock', label: 'Display Vehicles', children: <InStockUpdate /> },
-    // 6) Branches, 7) Users, 8) Announcements
+    // 6) Branches, 7) Users
     { key: 'branches', label: 'Branches', children: <Branches readOnly /> },
     { key: 'users', label: 'Users', children: <Users readOnly /> },
-    { key: 'announcements', label: (<><style>{`@keyframes annPulse{0%{transform:scale(1);}60%{transform:scale(1.05);}100%{transform:scale(1);}}`}</style><span>Announcements<NewPill/></span></>), children: <Announcements /> },
     
   ]
 

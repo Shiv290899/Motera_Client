@@ -25,9 +25,9 @@ import { exportToCsv } from "../utils/csvExport";
 const { Text } = Typography;
 
 const DEFAULT_BOOKING_GAS_URL =
-  "https://script.google.com/macros/s/AKfycbybD3QLJD6e8yJXpiW1uGVSKB4CGypch51NmlKfjsR32jKvLql8dbV7cGIoFDCLzSysZQ/exec";
+  "https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=booking";
 const DEFAULT_JOBCARD_GAS_URL =
-  "https://script.google.com/macros/s/AKfycbwX0-KYGAGl7Gte4f_rF8OfnimU7T5WetLIv6gba_o7-kOOjzgOM3JnsHkoqrDJK83GCQ/exec";
+  "https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=jobcard";
 const GAS_SECRET = import.meta.env.VITE_JOBCARD_GAS_SECRET || "";
 const BOOKING_SECRET = import.meta.env.VITE_BOOKING_GAS_SECRET || "";
 

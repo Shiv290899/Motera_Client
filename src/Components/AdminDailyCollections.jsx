@@ -4,13 +4,14 @@ import { Table, Space, Button, Select, message, Segmented, Grid, Modal, Form, In
 import { saveJobcardViaWebhook } from '../apiCalls/forms';
 import { listUsersPublic } from '../apiCalls/adminUsers';
 import { exportToCsv } from '../utils/csvExport';
+import { uniqNoCaseSorted } from '../utils/uniqNoCase';
 
 const { Text } = Typography;
 
 export default function AdminDailyCollections() {
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
-  const DEFAULT_JC_URL = 'https://script.google.com/macros/s/AKfycbwX0-KYGAGl7Gte4f_rF8OfnimU7T5WetLIv6gba_o7-kOOjzgOM3JnsHkoqrDJK83GCQ/exec';
+  const DEFAULT_JC_URL = 'https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=jobcard';
   const GAS_URL = import.meta.env.VITE_JOBCARD_GAS_URL || DEFAULT_JC_URL;
   const SECRET = import.meta.env.VITE_JOBCARD_GAS_SECRET || '';
   const readUser = () => { try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; } };
@@ -176,8 +177,10 @@ export default function AdminDailyCollections() {
   // useEffect(() => { fetchRows(); }, []);
 
   // Build staff + branch lists for filters (dynamic from data)
-  const staffFilterOptions = Array.from(new Set(ledgerRows.map(r => (r.staff || '').toString()))).map(s => ({ value: s, label: s || '(Unknown)' }));
-  const branchOptions = Array.from(new Set(ledgerRows.map(r => (r.branch || '').toString()))).map(b => ({ value: b, label: b || '(Unknown)' }));
+  const staffFilterOptions = uniqNoCaseSorted(ledgerRows.map(r => (r.staff || '').toString()))
+    .map(s => ({ value: s, label: s || '(Unknown)' }));
+  const branchOptions = uniqNoCaseSorted(ledgerRows.map(r => (r.branch || '').toString()))
+    .map(b => ({ value: b, label: b || '(Unknown)' }));
 
   // (Removed DailyCollections date-based summary calculations)
 

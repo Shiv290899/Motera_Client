@@ -10,6 +10,7 @@ import { saveBookingViaWebhook } from "../apiCalls/forms";
 import { listBranchesPublic } from "../apiCalls/branches";
 import { listUsersPublic } from "../apiCalls/adminUsers";
 import { exportToCsv } from "../utils/csvExport";
+import { uniqNoCaseSorted } from "../utils/uniqNoCase";
 
 const { Text } = Typography;
 
@@ -82,7 +83,7 @@ export default function Bookings() {
       if (Array.isArray(u?.branches)) {
         u.branches.forEach((b)=>{ const nm = typeof b === 'string' ? b : (b?.name || ''); if (nm) list.push(nm); });
       }
-      setAllowedBranches(Array.from(new Set(list.filter(Boolean))));
+      setAllowedBranches(uniqNoCaseSorted(list.filter(Boolean)));
     } catch { /* ignore */ }
   }, []);
   useEffect(() => {
@@ -104,7 +105,7 @@ export default function Bookings() {
           .filter((b) => String(b?.status || '').toLowerCase() === 'active')
           .map((b) => b.name)
           .filter(Boolean);
-        setBranchOptions(names);
+        setBranchOptions(uniqNoCaseSorted(names));
       } else {
         setBranchOptions([]);
         if (branchesRes.status === 'fulfilled') {
@@ -116,7 +117,7 @@ export default function Bookings() {
           .filter((u) => String(u.role || '').toLowerCase() === 'staff')
           .map((u) => u.name || u.email || '')
           .filter(Boolean);
-        setExecutiveOptions(names);
+        setExecutiveOptions(uniqNoCaseSorted(names));
       } else {
         setExecutiveOptions([]);
         if (usersRes.status === 'fulfilled') {
@@ -136,7 +137,7 @@ export default function Bookings() {
 
   // Reuse the same GAS URL for list + print so search works
   const DEFAULT_BOOKING_GAS_URL =
-    "https://script.google.com/macros/s/AKfycbybD3QLJD6e8yJXpiW1uGVSKB4CGypch51NmlKfjsR32jKvLql8dbV7cGIoFDCLzSysZQ/exec";
+    "https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=booking";
   const GAS_URL_STATIC = import.meta.env.VITE_BOOKING_GAS_URL || DEFAULT_BOOKING_GAS_URL;
   const GAS_SECRET_STATIC = import.meta.env.VITE_BOOKING_GAS_SECRET || '';
 
@@ -426,7 +427,7 @@ export default function Bookings() {
   const updateBooking = async (bookingId, patch, mobile) => {
     try {
       setUpdating(bookingId);
-      const DEFAULT_BOOKING_GAS_URL ="https://script.google.com/macros/s/AKfycbybD3QLJD6e8yJXpiW1uGVSKB4CGypch51NmlKfjsR32jKvLql8dbV7cGIoFDCLzSysZQ/exec";
+      const DEFAULT_BOOKING_GAS_URL ="https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=booking";
       const GAS_URL = import.meta.env.VITE_BOOKING_GAS_URL || DEFAULT_BOOKING_GAS_URL;
       const SECRET = import.meta.env.VITE_BOOKING_GAS_SECRET || '';
       // Mirror patch keys to exact Sheet headers to ensure update reflects
@@ -462,7 +463,7 @@ export default function Bookings() {
 
   // Minimal upload helper to GAS (same endpoint used by BookingForm)
   const uploadFileToGAS = async (file) => {
-    const DEFAULT_BOOKING_GAS_URL = "https://script.google.com/macros/s/AKfycbybD3QLJD6e8yJXpiW1uGVSKB4CGypch51NmlKfjsR32jKvLql8dbV7cGIoFDCLzSysZQ/exec";
+    const DEFAULT_BOOKING_GAS_URL = "https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=booking";
     const GAS_URL = import.meta.env.VITE_BOOKING_GAS_URL || DEFAULT_BOOKING_GAS_URL;
     const SECRET = import.meta.env.VITE_BOOKING_GAS_SECRET || '';
     if (!GAS_URL) throw new Error('GAS URL not configured');

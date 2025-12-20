@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { Table, Button, Space, Modal, Form, Input, InputNumber, message, Popconfirm, Alert, Typography, Tag, Select } from 'antd'
 import { ReloadOutlined, PlusOutlined, EditOutlined } from '@ant-design/icons'
 import { exportToCsv } from '../utils/csvExport'
+import { uniqNoCaseSorted } from '../utils/uniqNoCase'
 
 const { Text } = Typography
 
@@ -71,7 +72,7 @@ const normalizeRow = (row = {}) => {
 }
 
 export default function VehicleCatalogManager({ csvFallbackUrl }) {
-  const GAS_URL = import.meta.env.VITE_VEHICLE_CATALOG_GAS_URL || 'https://script.google.com/macros/s/AKfycbyqah2vllS4FCZZsxheXSQF4Lwv8kKsCmNSJ4GIikjrGMscGWLTurK0Nzu_oAHLSdZXsg/exec'
+  const GAS_URL = import.meta.env.VITE_VEHICLE_CATALOG_GAS_URL || 'https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=vehiclecatalog'
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -212,9 +213,9 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
   }, [filteredRows, norm])
 
   const companyOptions = useMemo(() => {
-    const set = new Set(rows.map((r) => norm(r.company)).filter(Boolean))
-    return Array.from(set).map((c) => ({ value: c, label: (c || '').toUpperCase() })).sort((a, b) => a.label.localeCompare(b.label))
-  }, [rows])
+    const uniq = uniqNoCaseSorted(rows.map((r) => r.company))
+    return uniq.map((c) => ({ value: norm(c), label: (c || '').toUpperCase() })).sort((a, b) => a.label.localeCompare(b.label))
+  }, [rows, norm])
 
   const handleSubmit = async () => {
     try {

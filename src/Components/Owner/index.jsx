@@ -8,14 +8,10 @@ import Quotation from '../Quotation'
 import Jobcards from '../Jobcards'
 import JobCard from '../JobCard'
 import Branches from '../Admin/Branches'
-import Announcements from '../Announcements'
-import useAnnouncementBadge from '../../hooks/useAnnouncementBadge'
 import Users from '../Admin/Users'
 import AdminDailyCollections from '../AdminDailyCollections'
 import VehicleSearch from '../VehicleSearch'
 import VehicleCatalogManager from '../VehicleCatalogManager'
-
-// Announcements tab/banner removed as requested
 
 // Owner dashboard: Analytics & Reports in tabs
 export default function OwnerIndex() {
@@ -58,11 +54,6 @@ export default function OwnerIndex() {
     </div>
   )
 
-  const { hasNew, latestItem } = useAnnouncementBadge()
-  const pillColor = (t) => (t === 'alert' ? '#fa541c' : t === 'warning' ? '#faad14' : '#2f54eb')
-  const NewPill = () => hasNew ? (
-    <span style={{ marginLeft:6, padding:'0 6px', borderRadius:10, fontSize:11, color:'#fff', fontWeight:700, background:pillColor(latestItem?.type), display:'inline-block', animation:'annPulse 1.6s ease-in-out infinite' }}>NEW</span>
-  ) : null
   const items = [
     // 1) Quotation (form), 2) Quotations (list), 3) Job Cards, 4) Bookings
     { key: 'collections', label: 'Daily Collections', children: <AdminDailyCollections /> },
@@ -79,10 +70,9 @@ export default function OwnerIndex() {
    
     
     
-    // 6) Branches, 7) Users, 8) Announcements
+    // 6) Branches, 7) Users
     { key: 'branches', label: 'Branches', children: <Branches readOnly /> },
     { key: 'users', label: 'Users', children: <Users readOnly /> },
-    { key: 'announcements', label: (<><style>{`@keyframes annPulse{0%{transform:scale(1);}60%{transform:scale(1.05);}100%{transform:scale(1);}}`}</style><span>Announcements<NewPill/></span></>), children: <Announcements /> },
     { key: 'vehiclecatalog', label: 'Vehicle Catalog', children: <VehicleCatalogManager csvFallbackUrl={import.meta.env.VITE_VEHICLE_SHEET_CSV_URL || "https://docs.google.com/spreadsheets/d/e/2PACX-1vQYGuNPY_2ivfS7MTX4bWiu1DWdF2mrHSCnmTznZVEHxNmsrgcGWjVZN4UDUTOzQQdXTnbeM-ylCJbB/pub?gid=408799621&single=true&output=csv"} /> },
     // 9) Analytics & Reports, 10) Branch-level Sales, 11) Multi-branch Compare, 12) Sales Performance
     /* { key: 'analytics', label: 'Analytics & Reports', children: <AnalyticsReports /> },

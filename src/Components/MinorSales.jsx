@@ -8,7 +8,7 @@ import { GetCurrentUser } from "../apiCalls/users";
 // Optional: Configure your Minor Sales Google Apps Script Web App URL via Vite env
 // Add to client/.env (vite-project/.env):
 //   VITE_MINOR_SALES_GAS_URL=https://script.google.com/macros/s/YOUR_ID/exec
-const MINOR_SALES_GAS_URL = import.meta.env.VITE_MINOR_SALES_GAS_URL || "https://script.google.com/macros/s/AKfycbzbC3mT6yvFY11wCsOscheFBIW6rhr7Nm7NVVyNPW6-zZg6r-oncoUoixB9ZDck67is/exec"; // empty -> offline mode
+const MINOR_SALES_GAS_URL = import.meta.env.VITE_MINOR_SALES_GAS_URL || "https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=minorsales"; // empty -> offline mode
 
 const phoneRule = [
   { required: true, message: "Mobile number is required" },

@@ -6,6 +6,7 @@ import { listStocks, listCurrentStocks, createStock, updateStock, listPendingTra
 import BookingForm from "./BookingForm";
 import { listBranches, listBranchesPublic } from "../apiCalls/branches";
 import { exportToCsv } from "../utils/csvExport";
+import { uniqNoCaseSorted } from "../utils/uniqNoCase";
 
 // --- Config ---
 // Vehicle catalog CSV remains (read-only) for dropdowns
@@ -174,7 +175,7 @@ export default function StockUpdate() {
         const res = await listBranches({ limit: 100, status: 'active' }).catch(() => null);
         const data = res?.data?.items || [];
         const list = (Array.isArray(data) && data.length ? data : (await listBranchesPublic({ status: 'active', limit: 100 })).data.items) || [];
-        const names = Array.from(new Set(list.map((b) => String(b?.name || '').trim()).filter(Boolean)));
+        const names = uniqNoCaseSorted(list.map((b) => String(b?.name || '').trim()).filter(Boolean));
         setBranchNames(names);
       } catch {
         setBranchNames([]);
@@ -199,9 +200,9 @@ export default function StockUpdate() {
     }
   }, [cacheKey]);
 
-  const companies = useMemo(() => [...new Set(catalog.map((r) => r.company))], [catalog]);
-  const models = useMemo(() => [...new Set(catalog.filter((r) => r.company === company).map((r) => r.model))], [catalog, company]);
-  const variants = useMemo(() => [...new Set(catalog.filter((r) => r.company === company && r.model === model).map((r) => r.variant))], [catalog, company, model]);
+  const companies = useMemo(() => uniqNoCaseSorted(catalog.map((r) => r.company)), [catalog]);
+  const models = useMemo(() => uniqNoCaseSorted(catalog.filter((r) => r.company === company).map((r) => r.model)), [catalog, company]);
+  const variants = useMemo(() => uniqNoCaseSorted(catalog.filter((r) => r.company === company && r.model === model).map((r) => r.variant)), [catalog, company, model]);
   // Preset color choices with hex samples for quick pick
   // Updated per requirement to use the following 19 colors
   const PRESET_COLORS = useMemo(() => ([

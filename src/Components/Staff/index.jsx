@@ -8,10 +8,8 @@ import BookingForm from "../BookingForm";
 import InStockUpdate from "../InStockUpdate";
 import StockUpdate from "../StockUpdate";
 import FollowUpsTabs from "../FollowUpsTabs";
-import Announcements from "../Announcements";
 import MinorSales from "../MinorSales";
 import VehicleSearch from "../VehicleSearch";
-import useAnnouncementBadge from "../../hooks/useAnnouncementBadge";
 import { GetCurrentUser } from "../../apiCalls/users";
 import StaffAccountCard from "../StaffAccountCard";
 
@@ -24,21 +22,6 @@ export default function Staff() {
 
   const container = { maxWidth: 1200, margin: "0 auto", padding: isMobile ? 12 : 16 };
   const wrap = { paddingTop: 12, width: "100%", overflowX: "auto", minWidth: 0 };
-  const { hasNew, latestItem } = useAnnouncementBadge();
-  const pillColor = (t) => (t === 'alert' ? '#fa541c' : t === 'warning' ? '#faad14' : '#2f54eb');
-  const NewPill = () => hasNew ? (
-    <span style={{
-      marginLeft: 6,
-      padding: '0 6px',
-      borderRadius: 10,
-      fontSize: 11,
-      color: '#fff',
-      fontWeight: 700,
-      background: pillColor(latestItem?.type),
-      display: 'inline-block',
-      animation: 'annPulse 1.6s ease-in-out infinite'
-    }}>NEW</span>
-  ) : null;
 
   const tabLabel = (emoji, text) => (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
@@ -130,10 +113,7 @@ export default function Staff() {
     {
       key: "minorsales",
       label: (
-        <>
-          <style>{`@keyframes annPulse{0%{transform:scale(1);}60%{transform:scale(1.05);}100%{transform:scale(1);}}`}</style>
-          <span>{tabLabel('🛒', "Minor Sales")}<NewPill/></span>
-        </>
+        <span>{tabLabel('🛒', "Minor Sales")}</span>
       ),
       children: (
         <div style={wrap}>
@@ -147,21 +127,6 @@ export default function Staff() {
       children: (
         <div style={wrap}>
           <StaffAccountCard />
-        </div>
-      ),
-    },
-
-    {
-      key: "announcements",
-      label: (
-        <>
-          <style>{`@keyframes annPulse{0%{transform:scale(1);}60%{transform:scale(1.05);}100%{transform:scale(1);}}`}</style>
-          <span>{tabLabel('📣', "Announcements")}<NewPill/></span>
-        </>
-      ),
-      children: (
-        <div style={wrap}>
-          <Announcements />
         </div>
       ),
     },

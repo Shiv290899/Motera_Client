@@ -60,7 +60,7 @@ th { background: #fafafa; }
       <div className="wrap">
         <div className="box">
           <div className="hdr">
-            <img src={isNH ? "/honda-logo.png" : "/shantha-logoprint.jpg"} alt="Logo" style={{ width: "100%", maxHeight: 92 }} />
+            <img src={isNH ? "/honda-logo.png" : "/motera-logoprint.jpg"} alt="Logo" style={{ width: "100%", maxHeight: 92 }} />
             <div className="shop">
               {isNH ? (
                 <>

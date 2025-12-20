@@ -5,6 +5,7 @@ import { saveBookingViaWebhook } from "../apiCalls/forms";
 import dayjs from "dayjs";
 import { useNavigate } from "react-router-dom";
 import { exportToCsv } from "../utils/csvExport";
+import { uniqNoCaseSorted } from "../utils/uniqNoCase";
 
 const { Text } = Typography;
 
@@ -68,7 +69,7 @@ export default function Quotations() {
       if (Array.isArray(u?.branches)) {
         u.branches.forEach((b)=>{ const nm = typeof b === 'string' ? b : (b?.name || ''); if (nm) list.push(nm); });
       }
-      setAllowedBranches(Array.from(new Set(list.filter(Boolean))));
+      setAllowedBranches(uniqNoCaseSorted(list.filter(Boolean)));
     } catch { /* ignore */ }
   }, []);
 
@@ -87,7 +88,7 @@ export default function Quotations() {
 
   const gasConfig = useMemo(() => {
     const DEFAULT_QUOT_URL =
-      "https://script.google.com/macros/s/AKfycbxXtfRVEFeaKu10ijzfQdOVlgkZWyH1q1t4zS3PHTX9rQQ7ztRJdpFV5svk98eUs3UXuw/exec";
+      "https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=quotation";
     const GAS_URL = import.meta.env.VITE_QUOTATION_GAS_URL || DEFAULT_QUOT_URL;
     const SECRET = import.meta.env.VITE_QUOTATION_GAS_SECRET || '';
     return { GAS_URL, SECRET };
@@ -584,6 +585,6 @@ function parseTsMs(v) {
   return null;
 }
   // GAS endpoints (same as used for list)
-  const DEFAULT_QUOT_URL = "https://script.google.com/macros/s/AKfycbxXtfRVEFeaKu10ijzfQdOVlgkZWyH1q1t4zS3PHTX9rQQ7ztRJdpFV5svk98eUs3UXuw/exec";
+  const DEFAULT_QUOT_URL = "https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=quotation";
   const GAS_URL = import.meta.env.VITE_QUOTATION_GAS_URL || DEFAULT_QUOT_URL;
   const GAS_SECRET = import.meta.env.VITE_QUOTATION_GAS_SECRET || '';

@@ -6,9 +6,10 @@ import dayjs from "dayjs";
 import { saveJobcardViaWebhook } from "../apiCalls/forms";
 import { useNavigate } from "react-router-dom";
 import { exportToCsv } from "../utils/csvExport";
+import { uniqNoCaseSorted } from "../utils/uniqNoCase";
 
 // GAS endpoints (module-level) so both list + remark share same URL/secret
-const DEFAULT_JC_URL = "https://script.google.com/macros/s/AKfycbwX0-KYGAGl7Gte4f_rF8OfnimU7T5WetLIv6gba_o7-kOOjzgOM3JnsHkoqrDJK83GCQ/exec";
+const DEFAULT_JC_URL = "https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=jobcard";
 const GAS_URL = import.meta.env.VITE_JOBCARD_GAS_URL || DEFAULT_JC_URL;
 const GAS_SECRET = import.meta.env.VITE_JOBCARD_GAS_SECRET || '';
 
@@ -75,7 +76,7 @@ export default function Jobcards() {
       if (Array.isArray(u?.branches)) {
         u.branches.forEach((b)=>{ const nm = typeof b === 'string' ? b : (b?.name || ''); if (nm) list.push(nm); });
       }
-      setAllowedBranches(Array.from(new Set(list.filter(Boolean))));
+      setAllowedBranches(uniqNoCaseSorted(list.filter(Boolean)));
     } catch { /* ignore */ }
   }, []);
 

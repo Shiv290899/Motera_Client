@@ -4,6 +4,7 @@ import { CheckCircleOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { GetCurrentUser } from "../apiCalls/users";
 import { saveBookingViaWebhook, saveJobcardViaWebhook } from "../apiCalls/forms";
+import { uniqNoCaseSorted } from "../utils/uniqNoCase";
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -131,7 +132,7 @@ export default function FollowUps({ mode = 'quotation', webhookUrl }) {
           if (nm) branches.push(nm);
         });
       }
-      const uniq = Array.from(new Set(branches.filter(Boolean)));
+      const uniq = uniqNoCaseSorted(branches.filter(Boolean));
       setAllowedBranches(uniq);
       setUserRole(String(user?.role || '').toLowerCase());
       setMe({ name, branch: uniq[0] || primaryBranch || '' });

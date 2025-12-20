@@ -28,6 +28,7 @@ import { listUsersPublic } from "../apiCalls/adminUsers";
 import BookingPrintSheet from "./BookingPrintSheet";
 import FetchBooking from "./FetchBooking";
 import { handleSmartPrint } from "../utils/printUtils";
+import { uniqNoCaseSorted, uniqNoCase } from "../utils/uniqNoCase";
 import dayjs from "dayjs";
 
 const { Title, Text } = Typography;
@@ -118,7 +119,7 @@ const SHEET_CSV_URL =
 // Google Apps Script Web App endpoint to save bookings to Google Sheet
 const BOOKING_GAS_URL =
   import.meta.env.VITE_BOOKING_GAS_URL ||
-  "https://script.google.com/macros/s/AKfycbybD3QLJD6e8yJXpiW1uGVSKB4CGypch51NmlKfjsR32jKvLql8dbV7cGIoFDCLzSysZQ/exec";
+  "https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=booking";
 
 const BOOKING_GAS_SECRET = import.meta.env.VITE_BOOKING_GAS_SECRET || "";
 
@@ -870,33 +871,29 @@ export default function BookingForm({
 
   // Dropdown lists
   const companies = useMemo(
-    () => [...new Set(bikeData.map((r) => r.company))],
+    () => uniqNoCaseSorted(bikeData.map((r) => r.company)),
     [bikeData]
   );
 
   const models = useMemo(
     () =>
-      [
-        ...new Set(
-          bikeData
-            .filter((r) => r.company === selectedCompany)
-            .map((r) => r.model)
-        ),
-      ],
+      uniqNoCaseSorted(
+        bikeData
+          .filter((r) => r.company === selectedCompany)
+          .map((r) => r.model)
+      ),
     [bikeData, selectedCompany]
   );
 
   const variants = useMemo(
     () =>
-      [
-        ...new Set(
-          bikeData
-            .filter(
-              (r) => r.company === selectedCompany && r.model === selectedModel
-            )
-            .map((r) => r.variant)
-        ),
-      ],
+      uniqNoCaseSorted(
+        bikeData
+          .filter(
+            (r) => r.company === selectedCompany && r.model === selectedModel
+          )
+          .map((r) => r.variant)
+      ),
     [bikeData, selectedCompany, selectedModel]
   );
 
@@ -935,7 +932,7 @@ export default function BookingForm({
   // Derive colors and chassis from stockItems based on selection
   const availableColors = useMemo(() => {
     const norm = (s) => String(s || "").trim().toLowerCase();
-    const uniq = new Set();
+    const collected = [];
     stockItems.forEach((s) => {
       if (!isActiveStock(s)) return;
       if (
@@ -944,10 +941,10 @@ export default function BookingForm({
         norm(s.variant) === norm(selectedVariant)
       ) {
         const c = String(s.color || "").trim();
-        if (c) uniq.add(c);
+        if (c) collected.push(c);
       }
     });
-    return Array.from(uniq);
+    return uniqNoCaseSorted(collected);
   }, [stockItems, selectedCompany, selectedModel, selectedVariant]);
 
   const availableChassis = useMemo(() => {

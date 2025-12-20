@@ -10,10 +10,11 @@ import { GetCurrentUser } from "../apiCalls/users";
 import { getBranch, listBranchesPublic } from "../apiCalls/branches";
 import { listUsersPublic } from "../apiCalls/adminUsers";
 import { saveBookingViaWebhook, reserveQuotationSerial } from "../apiCalls/forms";
+import { uniqNoCaseSorted, uniqNoCase } from "../utils/uniqNoCase";
 // GAS webhook for Quotation save/search/nextSerial
 // Default set in code so it works even without env var
 const DEFAULT_QUOT_GAS_URL =
-  "https://script.google.com/macros/s/AKfycby0YV2E2Ryb4YehYRzBistMW4sWN3XDcqaEfgkfRvEjmaKNVKq2Ubi3ul50AbxO6TVPJA/exec";
+  "https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=quotation";
 const QUOT_GAS_URL = import.meta.env.VITE_QUOTATION_GAS_URL || DEFAULT_QUOT_GAS_URL;
 
 
@@ -540,19 +541,18 @@ export default function Quotation() {
   }, [vehicleType]);
 
   const companies = useMemo(
-    () => [...new Set(bikeData.map((r) => r.company))],
+    () => uniqNoCaseSorted(bikeData.map((r) => r.company)),
     [bikeData]
   );
   const models = useMemo(
-    () => [...new Set(bikeData.filter((r) => r.company === company).map((r) => r.model))],
+    () => uniqNoCaseSorted(bikeData.filter((r) => r.company === company).map((r) => r.model)),
     [bikeData, company]
   );
   const variants = useMemo(
-    () => [
-      ...new Set(
+    () =>
+      uniqNoCaseSorted(
         bikeData.filter((r) => r.company === company && r.model === model).map((r) => r.variant)
       ),
-    ],
     [bikeData, company, model]
   );
 
@@ -963,7 +963,7 @@ export default function Quotation() {
       if (label) vehicleLines.push(`V${i + 2}: ${label}`);
     });
     const fittingsLine = Array.isArray(fittings) && fittings.length
-      ? `Fittings: ${Array.from(new Set(fittings.filter(Boolean))).join(", ")}`
+      ? `Fittings: ${uniqNoCase(fittings.filter(Boolean)).join(", ")}`
       : "";
     const mergedRemarks = [
       String(v.remarks || "").trim(),
@@ -1168,10 +1168,10 @@ export default function Quotation() {
 
   // ---------- Extra Vehicles UI Helpers ----------
   const filteredModels = (comp) =>
-    [...new Set(bikeData.filter((r) => r.company === comp).map((r) => r.model))];
+    uniqNoCaseSorted(bikeData.filter((r) => r.company === comp).map((r) => r.model));
 
   const filteredVariants = (comp, mdl) =>
-    [...new Set(bikeData.filter((r) => r.company === comp && r.model === mdl).map((r) => r.variant))];
+    uniqNoCaseSorted(bikeData.filter((r) => r.company === comp && r.model === mdl).map((r) => r.variant));
 
   const onExtraChange = (idx, patch) => {
     setExtraVehicles((prev) => {
@@ -1902,7 +1902,7 @@ export default function Quotation() {
                   }}
                 >
                   <img
-                    src={brand === "SHANTHA" ? "/shantha-logoprint.jpg" : "/honda-logo.png"}
+                    src={brand === "SHANTHA" ? "/motera-logoprint.jpg" : "/honda-logo.png"}
                     alt="Brand Logo"
                     style={{
                       height: 130,

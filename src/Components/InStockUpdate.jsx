@@ -55,10 +55,25 @@ export default function InStockUpdate() {
   const [selModel, setSelModel] = useState("");
   const [selVariant, setSelVariant] = useState("");
   useEffect(()=>{ (async()=>{ try{ const raw=await fetchSheetRowsCSV(CATALOG_CSV_URL); const cleaned=raw.map(normalizeCatalogRow).filter(r=>r.company&&r.model&&r.variant); setCatalog(cleaned); setSheetOk(cleaned.length>0);} catch{ setCatalog([]); setSheetOk(false);} })(); },[]);
-  const companyOptions = useMemo(()=> [...new Set(catalog.map(r=>r.company))], [catalog]);
-  const modelOptions = useMemo(()=> [...new Set(catalog.filter(r=>r.company===selCompany).map(r=>r.model))], [catalog, selCompany]);
-  const variantOptions = useMemo(()=> [...new Set(catalog.filter(r=>r.company===selCompany && r.model===selModel).map(r=>r.variant))], [catalog, selCompany, selModel]);
-  const colorOptions = useMemo(()=> { const dyn=catalog.filter(r=>r.company===selCompany && r.model===selModel && r.variant===selVariant).map(r=>r.color).filter(Boolean); return dyn.length? Array.from(new Set(dyn)): []; }, [catalog, selCompany, selModel, selVariant]);
+  // Case-insensitive unique helper (preserves first seen casing for display)
+  const uniqNoCase = (arr) => {
+    const map = new Map();
+    arr.forEach((v) => {
+      const val = String(v || "").trim();
+      if (!val) return;
+      const key = val.toLowerCase();
+      if (!map.has(key)) map.set(key, val);
+    });
+    return Array.from(map.values()).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  };
+
+  const companyOptions = useMemo(()=> uniqNoCase(catalog.map(r=>r.company)), [catalog]);
+  const modelOptions = useMemo(()=> uniqNoCase(catalog.filter(r=>r.company===selCompany).map(r=>r.model)), [catalog, selCompany]);
+  const variantOptions = useMemo(()=> uniqNoCase(catalog.filter(r=>r.company===selCompany && r.model===selModel).map(r=>r.variant)), [catalog, selCompany, selModel]);
+  const colorOptions = useMemo(()=> {
+    const dyn=catalog.filter(r=>r.company===selCompany && r.model===selModel && r.variant===selVariant).map(r=>r.color).filter(Boolean);
+    return dyn.length? uniqNoCase(dyn): [];
+  }, [catalog, selCompany, selModel, selVariant]);
 
   // Current user for prefill & createdBy
   const currentUser = useMemo(() => { try { return JSON.parse(localStorage.getItem('user')||'null'); } catch { return null; } }, []);
@@ -70,7 +85,7 @@ export default function InStockUpdate() {
       try {
         const res = await listBranches({ limit: 100, status: "active" }).catch(() => null);
         const data = res?.data?.items || (await listBranchesPublic({ status: "active", limit: 100 })).data.items || [];
-        const names = Array.from(new Set((data || []).map((b) => String(b?.name || "").trim()).filter(Boolean)));
+        const names = uniqNoCase((data || []).map((b) => String(b?.name || "").trim()).filter(Boolean));
         setBranchOptions(names);
       } catch {
         setBranchOptions([]);
@@ -132,15 +147,14 @@ export default function InStockUpdate() {
 
   // Build option lists whenever items change (unique, sorted)
   useEffect(() => {
-    const uniq = (arr) => Array.from(new Set(arr.map((v) => String(v || "").trim()).filter(Boolean))).sort((a,b)=>a.localeCompare(b));
-    setCompanies(uniq(items.map((r)=>r.company)));
-    setModels(uniq(items.map((r)=>r.model)));
-    setVariants(uniq(items.map((r)=>r.variant)));
-    setColors(uniq(items.map((r)=>r.color)));
+    setCompanies(uniqNoCase(items.map((r)=>r.company)));
+    setModels(uniqNoCase(items.map((r)=>r.model)));
+    setVariants(uniqNoCase(items.map((r)=>r.variant)));
+    setColors(uniqNoCase(items.map((r)=>r.color)));
   }, [items]);
 
   // Helper for dependent option lists
-  const uniqList = (arr) => Array.from(new Set(arr.map((v) => String(v || "").trim()).filter(Boolean))).sort((a,b)=>a.localeCompare(b));
+  const uniqList = (arr) => uniqNoCase(arr);
 
   // Dependent options for Model and Variant based on current selections
   const modelOptionsFiltered = useMemo(() => {

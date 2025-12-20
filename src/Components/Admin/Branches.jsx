@@ -2,6 +2,7 @@ import React from "react";
 import { Table, Button, Space, Modal, Form, Input, Select, message, Tag, Row, Col, Typography, Tooltip } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import { listBranches, listBranchesPublic, createBranch, updateBranch, deleteBranch } from "../../apiCalls/branches";
+import { uniqNoCaseSorted } from "../../utils/uniqNoCase";
 
 const TYPE_OPTIONS = [
   { label: "Sales & Services", value: "sales & services" },
@@ -73,8 +74,8 @@ export default function Branches({ readOnly = false }) {
 
   // Derived filters + filtered data
   const cities = React.useMemo(() => {
-    const s = new Set((items || []).map((b) => (b.address?.city ? String(b.address.city).trim() : "")).filter(Boolean));
-    return ["all", ...Array.from(s).sort((a,b)=>a.localeCompare(b))];
+    const uniq = uniqNoCaseSorted((items || []).map((b) => (b.address?.city ? String(b.address.city).trim() : "")).filter(Boolean));
+    return ["all", ...uniq];
   }, [items]);
   const filtered = React.useMemo(() => {
     const s = String(q || "").toLowerCase();

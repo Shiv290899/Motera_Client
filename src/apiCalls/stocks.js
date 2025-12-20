@@ -4,7 +4,7 @@ import { axiosInstance } from "./index";
 // Stocks are backed by a Google Apps Script Web App, but browsers often hit CORS issues with direct calls.
 // Prefer calling our backend proxy (`/api/stocks/gas`) via `axiosInstance` and fall back to direct GAS only if needed.
 const DEFAULT_GAS_STOCKS_URL =
-  "https://script.google.com/macros/s/AKfycbzWT7aSLTZl-qW2peDaHMcsW_aA55ttVfheZThFfYpj7sMm09Mg_6Gp2xjc7Z0XNHmwpw/exec";
+  "https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=stocks";
 const DIRECT_GAS_STOCKS_URL = import.meta.env.VITE_STOCKS_GAS_URL || "";
 
 const isPlainObject = (v) => v && typeof v === "object" && !Array.isArray(v);

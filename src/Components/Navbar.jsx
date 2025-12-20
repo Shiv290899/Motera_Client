@@ -113,8 +113,8 @@ export default function Navbar() {
 
   const [user, setUser] = React.useState(() => getCurrentUser());
   // Logo fallbacks to avoid repeated failing requests
-  const [logoSrc, setLogoSrc] = React.useState('/shantha-logo.jpg');
-  const [logoSmallSrc, setLogoSmallSrc] = React.useState('/shantha-logo.jpg');
+  const [logoSrc, setLogoSrc] = React.useState('/motera-logo.jpg');
+  const [logoSmallSrc, setLogoSmallSrc] = React.useState('/motera-logo.jpg');
   // ^ Holds the current user object or null when logged out.
 
   // Keep user state in sync when localStorage changes (e.g., in other tabs)
