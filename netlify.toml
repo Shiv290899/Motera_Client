@@ -1,0 +1,43 @@
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/users/*"
+  to = "/.netlify/functions/users/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/api/users"
+  to = "/.netlify/functions/users"
+  status = 200
+
+[[redirects]]
+  from = "/api/branches/*"
+  to = "/.netlify/functions/branches/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/api/branches"
+  to = "/.netlify/functions/branches"
+  status = 200
+
+[[redirects]]
+  from = "/api/forms/*"
+  to = "/.netlify/functions/forms/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/api/forms"
+  to = "/.netlify/functions/forms"
+  status = 200
+
+[[redirects]]
+  from = "/api/stocks/*"
+  to = "/.netlify/functions/stocks/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/api/stocks"
+  to = "/.netlify/functions/stocks"
+  status = 200
