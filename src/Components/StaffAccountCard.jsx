@@ -7,7 +7,7 @@ const { Text } = Typography;
 export default function StaffAccountCard() {
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
-  const DEFAULT_JC_URL = 'https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=jobcard';
+  const DEFAULT_JC_URL = 'https://script.google.com/macros/s/AKfycbwd-hKTwEfAretqEn7c_jIqNgheFgDaSVjCO3wHHQxgXQbbd8grLr8tUaRyLoAJWe4O/exec?module=jobcard';
   const GAS_URL = import.meta.env.VITE_JOBCARD_GAS_URL || DEFAULT_JC_URL;
   const SECRET = import.meta.env.VITE_JOBCARD_GAS_SECRET || '';
 
@@ -406,7 +406,38 @@ async function fetchLedgerTransactions({ GAS_URL, SECRET, branch, staff, mode })
   const resp = await saveJobcardViaWebhook({ webhookUrl: GAS_URL, method:'GET', payload });
   const js = resp?.data || resp || {};
   if (!js?.success) throw new Error('Failed');
-  return Array.isArray(js.rows) ? js.rows : [];
+  const rows = Array.isArray(js.rows) ? js.rows : [];
+  // De-dupe identical ledger rows (same source + payment details)
+  const normKey = (v) => String(v ?? '').trim().toLowerCase();
+  const rowTs = (r) => {
+    const raw = r?.dateTimeIso || r?.date;
+    const n = Number(new Date(String(raw)));
+    return Number.isFinite(n) ? n : 0;
+  };
+  const rowGroupKey = (r) => {
+    const sourceId = normKey(r?.sourceId || r?.sourceID || r?.jcNo || r?.source || '');
+    const tsKey = normKey(r?.dateTimeIso || r?.date || '');
+    return ([
+      normKey(r?.branch),
+      normKey(r?.staff),
+      normKey(r?.sourceType),
+      sourceId || tsKey,
+      normKey(r?.customerMobile),
+      normKey(r?.paymentMode),
+      normKey(r?.cashAmount ?? r?.cashPending),
+      normKey(r?.onlineAmount ?? r?.onlinePending),
+      normKey(r?.utr),
+    ]).join('|');
+  };
+  const map = new Map();
+  rows.forEach((r) => {
+    const key = rowGroupKey(r);
+    const prev = map.get(key);
+    if (!prev || rowTs(r) >= rowTs(prev)) {
+      map.set(key, r);
+    }
+  });
+  return Array.from(map.values());
 }
 
 // (openTx defined inside component)
@@ -420,9 +451,8 @@ function formatShortDate(raw){
     const y = d.getFullYear();
     const m = String(d.getMonth()+1).padStart(2,'0');
     const day = String(d.getDate()).padStart(2,'0');
-    let h = d.getHours()%12; if (h===0) h = 12;
-    const hh = String(h).padStart(2,'0');
+    const hh = String(d.getHours()).padStart(2,'0');
     const mm = String(d.getMinutes()).padStart(2,'0');
-    return `${y}-${m}-${day} ${hh}:${mm}`;
+    return `${day}-${m}-${y} ${hh}:${mm}`;
   } catch { return String(raw||''); }
 }

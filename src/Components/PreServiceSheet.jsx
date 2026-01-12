@@ -74,8 +74,6 @@ const PreServiceSheet = forwardRef(function PreServiceSheet(
     return s === "yes" || s === "y" || s === "true" || s === "1";
   })();
   const floorMatNo = vals?.floorMat != null ? !floorMatYes : false;
-  const branch = String(vals?.branch || "").trim();
-  const isNH = branch === "Byadarahalli"; // Switch branding for Byadarahalli
   const serviceTypeList = ["Free", "Paid", "Minor", "Accidental"];
 
   return (
@@ -244,18 +242,9 @@ img { max-width: 100%; height: auto; background: transparent; }
         <div className="pre-wrap">
           {/* Header */}
           <div className="title-wrap">
-            <div className="title-en">{isNH ? "NH MOTORS JOB CARD" : "SHANTHA MOTORS JOB CARD"}</div>
-            <div className="title-kn">{isNH ? "ಎನ್ ಎಚ್ ಮೋಟರ್ಸ್" : "ಶಾಂತ ಮೋಟರ್ಸ್"}</div>
+            <div className="title-en">MOTERA JOB CARD</div>
+            <div className="title-kn">ಮೋಟೆರಾ</div>
           </div>
-          {isNH && (
-            <div style={{ marginTop: 2 }}>
-              <div className="shop-addr">
-                Site No. 116/1, Bydarahalli, Magadi Main Road, Opp.<br />
-                HP Petrol Bunk, Bangalore - 560091
-              </div>
-              <div className="shop-sub">Mob: 9731366921 / 8073283502 / 9741609799</div>
-            </div>
-          )}
 
 
           {/* JC / Exec / Date / Mechanic + Location QR side by side */}
@@ -273,9 +262,7 @@ img { max-width: 100%; height: auto; background: transparent; }
               <img src="/location-qr.png" alt="location qr" style={{ height: 60 }} />
               <div className="scan">Scan for Location</div>
               <div className="tiny" style={{ marginTop: 3 }}>
-                {isNH
-                  ? "Mob: 9731366921 / 8073283502 / 9741609799"
-                  : "Mob: 9731366921 / 8073283502"}
+                Mob: 9731366921 / 8073283502
               </div>
             </div>
           </div>
@@ -411,9 +398,9 @@ img { max-width: 100%; height: auto; background: transparent; }
         <div className="pre-wrap voucher">
           {/* One continuous line: Kannada | English */}
           <div className="brand-line">
-            <span className="brand-kn">{isNH ? "ಎನ್ ಎಚ್ ಮೋಟರ್ಸ್" : "ಶಾಂತ ಮೋಟರ್ಸ್"}</span>
+            <span className="brand-kn">ಮೋಟೆರಾ</span>
             <span> || </span>
-            <span className="brand-en">{isNH ? "NH MOTORS" : "SHANTHA MOTORS"}</span>
+            <span className="brand-en">MOTERA</span>
           </div>
 
           {/* Three blocks directly below */}
@@ -436,7 +423,7 @@ img { max-width: 100%; height: auto; background: transparent; }
             <div className="col col-right">
               <img src="/location-qr.png" alt="Location QR" className="qr" />
               <div className="scan">Scan for Location</div>
-              <div className="tiny phones">{isNH ? "9731366921 • 8073283502 • 9741609799" : "9731366921 • 8073283502"}</div>
+              <div className="tiny phones">9731366921 • 8073283502</div>
             </div>
           </div>
         </div>

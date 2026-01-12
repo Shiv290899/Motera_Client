@@ -12,13 +12,13 @@ export default function FollowUpsTabs() {
   );
 
   const DEFAULT_QUOT_URL =
-    'https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=quotation';
+    'https://script.google.com/macros/s/AKfycbwd-hKTwEfAretqEn7c_jIqNgheFgDaSVjCO3wHHQxgXQbbd8grLr8tUaRyLoAJWe4O/exec?module=quotation';
   const DEFAULT_JC_URL =
-    'https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=jobcard';
+    'https://script.google.com/macros/s/AKfycbwd-hKTwEfAretqEn7c_jIqNgheFgDaSVjCO3wHHQxgXQbbd8grLr8tUaRyLoAJWe4O/exec?module=jobcard';
   const QUOT_URL = import.meta.env.VITE_QUOTATION_GAS_URL || DEFAULT_QUOT_URL;
   const JC_URL = import.meta.env.VITE_JOBCARD_GAS_URL || DEFAULT_JC_URL;
   const DEFAULT_BOOKING_URL =
-    import.meta.env.VITE_BOOKING_GAS_URL || 'https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=booking';
+    import.meta.env.VITE_BOOKING_GAS_URL || 'https://script.google.com/macros/s/AKfycbwd-hKTwEfAretqEn7c_jIqNgheFgDaSVjCO3wHHQxgXQbbd8grLr8tUaRyLoAJWe4O/exec?module=booking';
 
   const items = [
     {
@@ -30,11 +30,6 @@ export default function FollowUpsTabs() {
       key: 'jobcard',
       label: tabLabel(<ToolOutlined />, 'Job Card'),
       children: <FollowUps mode="jobcard" webhookUrl={JC_URL} />,
-    },
-    {
-      key: 'booking',
-      label: tabLabel(<CalendarOutlined />, 'Booking'),
-      children: <FollowUps mode="booking" webhookUrl={DEFAULT_BOOKING_URL} />,
     },
     
   ];

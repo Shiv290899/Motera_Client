@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import dayjs from 'dayjs'
 import { Table, Button, Space, Modal, Form, Input, InputNumber, message, Popconfirm, Alert, Typography, Tag, Select } from 'antd'
 import { ReloadOutlined, PlusOutlined, EditOutlined } from '@ant-design/icons'
 import { exportToCsv } from '../utils/csvExport'
-import { uniqNoCaseSorted } from '../utils/uniqNoCase'
 
 const { Text } = Typography
 
@@ -11,6 +11,7 @@ const HEADERS = {
   company: ['Company', 'Company Name'],
   model: ['Model', 'Model Name'],
   variant: ['Variant'],
+  color: ['Color', 'Colours', 'Colors', 'Colour', 'Available Colors'],
   price: ['On-Road Price', 'On Road Price', 'OnRoadPrice', 'Price'],
 }
 
@@ -50,6 +51,11 @@ const fetchSheetRowsCSV = async (url) => {
 
 const pick = (row, keys) => String(keys.map((k) => row[k] ?? '').find((v) => v !== '') || '').trim()
 
+const buildCatalogKey = (company, model, variant) => {
+  const toKey = (s) => String(s || '').trim().toUpperCase()
+  return [toKey(company), toKey(model), toKey(variant)].join('|')
+}
+
 const normalizeRow = (row = {}) => {
   const rawPrice =
     pick(row, HEADERS.price) ||
@@ -58,21 +64,55 @@ const normalizeRow = (row = {}) => {
     row.onroadprice ||
     row.price ||
     0;
-  const price = Number(String(rawPrice || 0).replace(/[",\s₹]/g, '')) || 0;
+  const rawColor = pick(row, HEADERS.color) || row.color || row.colors || ''
+  const num = (v) => Number(String(v || 0).replace(/[",\s₹]/g, '')) || 0
+  const isNumericLike = (v) => {
+    const s = String(v || '').replace(/[",\s₹]/g, '')
+    return s !== '' && !Number.isNaN(Number(s))
+  }
+  const company = pick(row, HEADERS.company) || row.company || ''
+  const model = pick(row, HEADERS.model) || row.model || ''
+  const variant = pick(row, HEADERS.variant) || row.variant || ''
+  let price = num(rawPrice)
+  let color = String(rawColor || '').trim()
+  const rawKey = row.key || row.Key || ''
+  const rawUpdatedAt = row.UpdatedAt || row.updatedAt || row.updated_at || row.updated || ''
+  const rawUpdatedBy = row.UpdatedBy || row.updatedBy || row.updated_by || row.user || ''
+  const looksLikeDate = (v) => {
+    const d = new Date(v)
+    return !Number.isNaN(d.getTime())
+  }
+  const looksLikeKey = (v) => String(v || '').includes('|')
+  const fallbackKey = buildCatalogKey(company, model, variant)
+  let updatedAt = rawUpdatedAt
+  let updatedBy = rawUpdatedBy
+  let key = rawKey || fallbackKey
+  if (!looksLikeKey(key) || key === '') key = fallbackKey
+  const maybeShifted = !isNumericLike(rawPrice) && isNumericLike(rawColor) && price === 0
+  if (maybeShifted) {
+    price = num(rawColor)
+    color = ''
+    if (looksLikeKey(rawPrice)) key = rawPrice
+    if (!rawUpdatedBy && looksLikeDate(rawKey)) {
+      updatedAt = rawKey
+      updatedBy = rawUpdatedAt
+    }
+  }
   return {
-    id: row.id || row._id || row.rowId || undefined,
-    company: pick(row, HEADERS.company) || row.company || '',
-    model: pick(row, HEADERS.model) || row.model || '',
-    variant: pick(row, HEADERS.variant) || row.variant || '',
+    id: row.id || row._id || row.rowId || row._row || undefined,
+    company,
+    model,
+    variant,
+    color,
     onRoadPrice: price,
-    updatedAt: row.UpdatedAt || row.updatedAt || row.updated_at || row.updated || '',
-    updatedBy: row.UpdatedBy || row.updatedBy || row.updated_by || row.user || '',
-    key: row.key || row.id || `${pick(row, HEADERS.company)}|${pick(row, HEADERS.model)}|${pick(row, HEADERS.variant)}`,
+    updatedAt,
+    updatedBy,
+    key,
   }
 }
 
 export default function VehicleCatalogManager({ csvFallbackUrl }) {
-  const GAS_URL = import.meta.env.VITE_VEHICLE_CATALOG_GAS_URL || 'https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=vehiclecatalog'
+  const GAS_URL = import.meta.env.VITE_VEHICLE_CATALOG_GAS_URL || 'https://script.google.com/macros/s/AKfycbwd-hKTwEfAretqEn7c_jIqNgheFgDaSVjCO3wHHQxgXQbbd8grLr8tUaRyLoAJWe4O/exec?module=vehiclecatalog'
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -89,9 +129,19 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
 
   const catalogKey = (r) => `${String(r.company || '').trim().toUpperCase()}|${String(r.model || '').trim().toUpperCase()}|${String(r.variant || '').trim().toUpperCase()}`
 
+  const buildGasUrl = (action) => {
+    try {
+      const url = new URL(GAS_URL)
+      url.searchParams.set('action', action)
+      return url.toString()
+    } catch {
+      return `${GAS_URL}?action=${action}`
+    }
+  }
+
   const listVehicleCatalog = async () => {
     if (!GAS_URL) throw new Error('VEHICLE_CATALOG_GAS_URL is not configured')
-    const url = `${GAS_URL}?action=list`
+    const url = buildGasUrl('list')
     const res = await fetch(url, { method: 'GET', mode: 'cors', credentials: 'omit' })
     if (!res.ok) throw new Error('Failed to fetch catalog')
     return res.json()
@@ -167,6 +217,7 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
       company: record.company,
       model: record.model,
       variant: record.variant,
+      color: record.color,
       onRoadPrice: record.onRoadPrice,
     })
     setModalOpen(true)
@@ -193,7 +244,7 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
     const q = search.trim().toLowerCase()
     const variantQ = filterVariant.trim().toLowerCase()
     return rows.filter((r) => {
-      const matchesSearch = !q || [r.company, r.model, r.variant, r.updatedBy].some((f) =>
+      const matchesSearch = !q || [r.company, r.model, r.variant, r.color, r.updatedBy].some((f) =>
         String(f || '').toLowerCase().includes(q))
       const matchesCompany = filterCompany === 'all' || norm(r.company) === filterCompany
       const matchesVariant = !variantQ || norm(r.variant).includes(variantQ)
@@ -213,9 +264,9 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
   }, [filteredRows, norm])
 
   const companyOptions = useMemo(() => {
-    const uniq = uniqNoCaseSorted(rows.map((r) => r.company))
-    return uniq.map((c) => ({ value: norm(c), label: (c || '').toUpperCase() })).sort((a, b) => a.label.localeCompare(b.label))
-  }, [rows, norm])
+    const set = new Set(rows.map((r) => norm(r.company)).filter(Boolean))
+    return Array.from(set).map((c) => ({ value: c, label: (c || '').toUpperCase() })).sort((a, b) => a.label.localeCompare(b.label))
+  }, [rows])
 
   const handleSubmit = async () => {
     try {
@@ -224,6 +275,7 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
       ;['company','model','variant'].forEach((k) => {
         if (values[k]) values[k] = String(values[k]).toUpperCase()
       })
+      if (values.color) values.color = String(values.color).toUpperCase().trim()
       setSaving(true)
       const payload = {
         ...values,
@@ -257,8 +309,9 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
     { title: 'Company', dataIndex: 'company', key: 'company', sorter: (a, b) => a.company.localeCompare(b.company) },
     { title: 'Model', dataIndex: 'model', key: 'model', sorter: (a, b) => a.model.localeCompare(b.model) },
     { title: 'Variant', dataIndex: 'variant', key: 'variant', sorter: (a, b) => a.variant.localeCompare(b.variant) },
+    { title: 'Colors', dataIndex: 'color', key: 'color', render: (v) => v || <Text type="secondary">-</Text> },
     { title: 'On-Road Price (₹)', dataIndex: 'onRoadPrice', key: 'onRoadPrice', render: (v) => v ? v.toLocaleString('en-IN') : <Text type="secondary">0</Text>, sorter: (a, b) => (a.onRoadPrice || 0) - (b.onRoadPrice || 0) },
-    { title: 'Updated At', dataIndex: 'updatedAt', key: 'updatedAt', render: (v) => v ? new Date(v).toLocaleString() : <Text type="secondary">-</Text> },
+    { title: 'Updated At', dataIndex: 'updatedAt', key: 'updatedAt', render: (v) => v ? dayjs(v).format('DD-MM-YYYY HH:mm') : <Text type="secondary">-</Text> },
     { title: 'Updated By', dataIndex: 'updatedBy', key: 'updatedBy', render: (v) => v || <Text type="secondary">-</Text> },
     {
       title: 'Actions', key: 'actions', render: (_, record) => (
@@ -281,6 +334,7 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
       { key: 'company', label: 'Company' },
       { key: 'model', label: 'Model' },
       { key: 'variant', label: 'Variant' },
+      { key: 'color', label: 'Color' },
       { key: 'onRoadPrice', label: 'On-Road Price' },
       { key: 'updatedAt', label: 'Updated At' },
       { key: 'updatedBy', label: 'Updated By' },
@@ -289,6 +343,7 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
       company: r.company,
       model: r.model,
       variant: r.variant,
+      color: r.color,
       onRoadPrice: r.onRoadPrice,
       updatedAt: r.updatedAt,
       updatedBy: r.updatedBy,
@@ -333,7 +388,7 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
         </Space>
         <Space wrap>
           <Input
-            placeholder="Search company/model/variant/user"
+            placeholder="Search company/model/variant/color/user"
             allowClear
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -405,6 +460,14 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
           </Form.Item>
           <Form.Item name="variant" label="Variant" rules={[{ required: true, message: 'Enter variant' }]}>
             <Input placeholder="e.g., DISC" allowClear style={{ textTransform: 'uppercase' }} onChange={(e) => form.setFieldsValue({ variant: (e.target.value || '').toUpperCase() })} />
+          </Form.Item>
+          <Form.Item name="color" label="Colors (comma-separated)">
+            <Input
+              placeholder="e.g., RED, BLACK, BLUE"
+              allowClear
+              style={{ textTransform: 'uppercase' }}
+              onChange={(e) => form.setFieldsValue({ color: (e.target.value || '').toUpperCase() })}
+            />
           </Form.Item>
           <Form.Item name="onRoadPrice" label="On-Road Price (₹)" rules={[{ required: true, message: 'Enter price' }]}>
             <InputNumber style={{ width: '100%' }} min={0} step={500} parser={(v) => Number((v || '').toString().replace(/[^\d.-]/g, ''))} formatter={(v) => (v ? Number(v).toLocaleString('en-IN') : '')} />

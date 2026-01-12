@@ -27,8 +27,9 @@ import { listBranchesPublic } from "../apiCalls/branches";
 import { listUsersPublic } from "../apiCalls/adminUsers";
 import BookingPrintSheet from "./BookingPrintSheet";
 import FetchBooking from "./FetchBooking";
+import BookingHistoryButton from "./BookingHistoryButton";
 import { handleSmartPrint } from "../utils/printUtils";
-import { uniqNoCaseSorted, uniqNoCase } from "../utils/uniqNoCase";
+import { normalizeKey, uniqCaseInsensitive } from "../utils/caseInsensitive";
 import dayjs from "dayjs";
 
 const { Title, Text } = Typography;
@@ -119,7 +120,7 @@ const SHEET_CSV_URL =
 // Google Apps Script Web App endpoint to save bookings to Google Sheet
 const BOOKING_GAS_URL =
   import.meta.env.VITE_BOOKING_GAS_URL ||
-  "https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=booking";
+  "https://script.google.com/macros/s/AKfycbwd-hKTwEfAretqEn7c_jIqNgheFgDaSVjCO3wHHQxgXQbbd8grLr8tUaRyLoAJWe4O/exec?module=booking";
 
 const BOOKING_GAS_SECRET = import.meta.env.VITE_BOOKING_GAS_SECRET || "";
 
@@ -174,7 +175,7 @@ const HEADERS = {
   company: ["Company", "Company Name"],
   model: ["Model", "Model Name"],
   variant: ["Variant"],
-  price: ["On-Road Price", "On Road Price", "Price"],
+  price: ["On-Road Price", "On Road Price", "OnRoadPrice", "Price"],
 };
 
 const pick = (row, keys) =>
@@ -871,31 +872,28 @@ export default function BookingForm({
 
   // Dropdown lists
   const companies = useMemo(
-    () => uniqNoCaseSorted(bikeData.map((r) => r.company)),
+    () => uniqCaseInsensitive(bikeData.map((r) => r.company)),
     [bikeData]
   );
 
-  const models = useMemo(
-    () =>
-      uniqNoCaseSorted(
-        bikeData
-          .filter((r) => r.company === selectedCompany)
-          .map((r) => r.model)
-      ),
-    [bikeData, selectedCompany]
-  );
+  const models = useMemo(() => {
+    const companyKey = normalizeKey(selectedCompany);
+    const base = companyKey
+      ? bikeData.filter((r) => normalizeKey(r.company) === companyKey)
+      : bikeData;
+    return uniqCaseInsensitive(base.map((r) => r.model));
+  }, [bikeData, selectedCompany]);
 
-  const variants = useMemo(
-    () =>
-      uniqNoCaseSorted(
-        bikeData
-          .filter(
-            (r) => r.company === selectedCompany && r.model === selectedModel
-          )
-          .map((r) => r.variant)
-      ),
-    [bikeData, selectedCompany, selectedModel]
-  );
+  const variants = useMemo(() => {
+    const companyKey = normalizeKey(selectedCompany);
+    const modelKey = normalizeKey(selectedModel);
+    const base = bikeData.filter((r) => {
+      if (companyKey && normalizeKey(r.company) !== companyKey) return false;
+      if (modelKey && normalizeKey(r.model) !== modelKey) return false;
+      return true;
+    });
+    return uniqCaseInsensitive(base.map((r) => r.variant));
+  }, [bikeData, selectedCompany, selectedModel]);
 
   // Fetch current in-stock list once variant is selected (branch-scoped)
   useEffect(() => {
@@ -932,7 +930,7 @@ export default function BookingForm({
   // Derive colors and chassis from stockItems based on selection
   const availableColors = useMemo(() => {
     const norm = (s) => String(s || "").trim().toLowerCase();
-    const collected = [];
+    const uniq = new Set();
     stockItems.forEach((s) => {
       if (!isActiveStock(s)) return;
       if (
@@ -941,10 +939,10 @@ export default function BookingForm({
         norm(s.variant) === norm(selectedVariant)
       ) {
         const c = String(s.color || "").trim();
-        if (c) collected.push(c);
+        if (c) uniq.add(c);
       }
     });
-    return uniqNoCaseSorted(collected);
+    return Array.from(uniq);
   }, [stockItems, selectedCompany, selectedModel, selectedVariant]);
 
   const availableChassis = useMemo(() => {
@@ -1839,7 +1837,7 @@ export default function BookingForm({
                 step={500}
                 prefix={<CreditCardOutlined />}
                 placeholder="Enter amount"
-                disabled={false}
+                disabled={paymentsOnlyMode || hasFetchedBooking}
               />
             </Form.Item>
           </Col>
@@ -2306,6 +2304,7 @@ export default function BookingForm({
               </Text>
             </div>
             <div style={{ flex: 1 }} />
+            <Space size={8} wrap>
               <FetchBooking
                 form={form}
                 webhookUrl={BOOKING_GAS_URL}
@@ -2323,6 +2322,13 @@ export default function BookingForm({
                   message.info('Payments-only update mode enabled');
                 }}
               />
+              <BookingHistoryButton
+                form={form}
+                webhookUrl={BOOKING_GAS_URL}
+                bookingId={editRef?.bookingId}
+                mobile={editRef?.mobile}
+              />
+            </Space>
           </div>
         }
       >

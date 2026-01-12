@@ -189,7 +189,7 @@ function Login() {
   return (
     <div className="auth-container">
       <div className="auth-box">
-        <h1 className="title">Login to Shantha Motors</h1>
+        <h1 className="title">Login to Motera</h1>
         <Form layout="vertical" form={form} onFinish={onFinish}>
           <Form.Item
             label="Email"
@@ -238,7 +238,7 @@ function Login() {
         {resetStage === "request" ? (
           <>
             <p style={{ marginBottom: 16 }}>
-              Enter the email you use for Shantha Motors. If we find a matching account, we'll send instructions to reset your password.
+              Enter the email you use for Motera. If we find a matching account, we'll send instructions to reset your password.
             </p>
             <Form
               form={resetRequestForm}

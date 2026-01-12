@@ -1,5 +1,5 @@
 // FetchQuot.jsx
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import dayjs from "dayjs";
 import { saveBookingViaWebhook } from "../apiCalls/forms";
 import { Alert, Button, Modal, Input, List, Space, Spin, message } from "antd";
@@ -31,6 +31,7 @@ export default function FetchQuot({
   setFollowUpEnabled,
   setFollowUpAt,
   setFollowUpNotes,
+  autoApply,
   buttonText = "Fetch Details",
   buttonProps = {},
 }) {
@@ -41,6 +42,7 @@ export default function FetchQuot({
   const [loading, setLoading] = useState(false);
   const [matches, setMatches] = useState([]);
   const [notFoundText, setNotFoundText] = useState("");
+  const lastAutoRef = useRef("");
 
   // ---------------- helpers ----------------
   const tenDigits = (x) =>
@@ -83,7 +85,7 @@ export default function FetchQuot({
     // Fallback minimal object when payload missing (very old rows)
     return {
       version: 0,
-      brand: "SHANTHA",
+      brand: "MOTERA",
       mode: "cash",
       vehicleType: "scooter",
       fittings: [],
@@ -128,7 +130,7 @@ export default function FetchQuot({
     const toNumber = (x) => Number(String(x || 0).replace(/[,₹\s]/g, '')) || 0;
     return {
       version: 0,
-      brand: 'SHANTHA',
+      brand: 'MOTERA',
       mode: 'cash',
       vehicleType: 'scooter',
       fittings: [],
@@ -165,7 +167,7 @@ export default function FetchQuot({
     const data = normalizePayloadShape(dataRaw);
     try {
       // top-level states
-      setBrand?.(data.brand || "SHANTHA");
+      setBrand?.(data.brand || "MOTERA");
       setMode?.(data.mode || "cash");
       setVehicleType?.(data.vehicleType || "scooter");
       setFittings?.(Array.isArray(data.fittings) ? data.fittings : []);
@@ -209,6 +211,14 @@ export default function FetchQuot({
       message.error("Could not apply fetched details.");
     }
   };
+
+  useEffect(() => {
+    if (!autoApply?.payload) return;
+    const key = String(autoApply?.token || '') + ':' + String(autoApply?.payload?.formValues?.serialNo || autoApply?.payload?.serialNo || autoApply?.payload?.formValues?.mobile || '');
+    if (lastAutoRef.current === key) return;
+    lastAutoRef.current = key;
+    applyToForm(autoApply.payload);
+  }, [autoApply]);
 
   // ---------------- search ----------------
   const runSearch = async () => {

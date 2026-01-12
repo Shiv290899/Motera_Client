@@ -429,16 +429,16 @@ export default function Navbar() {
             <div style={styles.logoWrap}>
               <img
                 src={logoSrc}
-                alt="Shantha Motors Logo"
+                alt="Motera Logo"
                 style={styles.logoImg}
                 onError={(e) => {
                   // graceful fallback if logo missing; prevent loops
                   e.currentTarget.onerror = null;
-                  setLogoSrc('https://via.placeholder.com/200x48?text=Shantha+Motors');
+                  setLogoSrc('https://via.placeholder.com/200x48?text=Motera');
                 }}
               />
               <div>
-                <div style={styles.brandTitle}>Shantha Motors</div>
+                <div style={styles.brandTitle}>Motera</div>
                 <div style={styles.tagline}>The Power of Trust</div>
               </div>
             </div>
@@ -614,11 +614,11 @@ export default function Navbar() {
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <img
               src={logoSmallSrc}
-              alt="Shantha Motors Logo"
+              alt="Motera Logo"
               style={{ height: 28, width: "auto" }}
               onError={(e) => {
                 e.currentTarget.onerror = null;
-                setLogoSmallSrc('https://via.placeholder.com/120x28?text=SM');
+                setLogoSmallSrc('https://via.placeholder.com/120x28?text=Motera');
               }}
             />
             <strong>Menu</strong>

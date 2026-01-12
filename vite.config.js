@@ -7,7 +7,7 @@ import { cwd } from 'node:process'
 export default ({ mode }) => {
   // Use Node's cwd via explicit import to satisfy linters
   const env = loadEnv(mode, cwd(), '')
-  const backendOrigin = env.VITE_BACKEND_ORIGIN || 'http://localhost:8082'
+  const functionsOrigin = env.VITE_FUNCTIONS_ORIGIN || 'http://localhost:8888'
   return defineConfig({
     plugins: [react()],
     define: {
@@ -20,10 +20,11 @@ export default ({ mode }) => {
       // Default dev port; can be overridden via VITE_PORT
       port: parseInt(env.VITE_PORT || '5174', 10),
       proxy: {
-        // Forward API calls during development
+        // Forward API calls to Netlify Functions during development
         '/api': {
-          target: backendOrigin,
+          target: functionsOrigin,
           changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api/, '/.netlify/functions'),
         },
       },
     },

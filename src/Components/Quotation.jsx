@@ -2,19 +2,19 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import dayjs from "dayjs";
 import {
-  Row, Col, Form, Input, InputNumber, Select, Button, Radio, message, Checkbox, Divider, DatePicker, Switch
+  Row, Col, Form, Input, InputNumber, Select, Button, Radio, message, Checkbox, Divider, DatePicker, Switch, List, Modal, Spin
 } from "antd";
 import { PrinterOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import FetchQuot from "./FetchQuot"; // for fetching saved quotations
 import { GetCurrentUser } from "../apiCalls/users";
 import { getBranch, listBranchesPublic } from "../apiCalls/branches";
 import { listUsersPublic } from "../apiCalls/adminUsers";
+import { normalizeKey, uniqCaseInsensitive } from "../utils/caseInsensitive";
 import { saveBookingViaWebhook, reserveQuotationSerial } from "../apiCalls/forms";
-import { uniqNoCaseSorted, uniqNoCase } from "../utils/uniqNoCase";
 // GAS webhook for Quotation save/search/nextSerial
 // Default set in code so it works even without env var
 const DEFAULT_QUOT_GAS_URL =
-  "https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=quotation";
+  "https://script.google.com/macros/s/AKfycbwd-hKTwEfAretqEn7c_jIqNgheFgDaSVjCO3wHHQxgXQbbd8grLr8tUaRyLoAJWe4O/exec?module=quotation";
 const QUOT_GAS_URL = import.meta.env.VITE_QUOTATION_GAS_URL || DEFAULT_QUOT_GAS_URL;
 
 
@@ -244,8 +244,6 @@ const validateCore = async (form) => {
 export default function Quotation() {
   const [form] = Form.useForm();
 
-  const [brand, setBrand] = useState("SHANTHA"); // "SHANTHA" | "NH"
-
   const [bikeData, setBikeData] = useState([]);
   const [company, setCompany] = useState("");
   const [model, setModel] = useState("");
@@ -277,9 +275,9 @@ export default function Quotation() {
   const [vehicleType, setVehicleType] = useState("scooter");
   const [fittings, setFittings] = useState(["Side Stand", "Floor Mat", "ISI Helmet", "Grip Cover"]);
   const [docsReq, setDocsReq] = useState(DOCS_REQUIRED);
-  const [extraVehicles, setExtraVehicles] = useState([]); // up to 2 records (V2, V3)
+  const [extraVehicles, setExtraVehicles] = useState([]); // up to 3 records (V2..V4)
   const [userStaffName, setUserStaffName] = useState();
-  const [, setUserRole] = useState();
+  const [ setUserRole] = useState("");
   // Defaults for restore if fields get cleared
   const [defaultBranchName, setDefaultBranchName] = useState("");
   const [allowedBranches, setAllowedBranches] = useState([]); // [{id,name,code}]
@@ -292,6 +290,11 @@ export default function Quotation() {
   const [followUpEnabled, setFollowUpEnabled] = useState(true);
   const [followUpAt, setFollowUpAt] = useState(() => dayjs().add(2, 'day').hour(10).minute(0).second(0).millisecond(0));
   const [followUpNotes, setFollowUpNotes] = useState("");
+  const [pendingOpen, setPendingOpen] = useState(false);
+  const [pendingLoading, setPendingLoading] = useState(false);
+  const [pendingItems, setPendingItems] = useState([]);
+  const [pendingLoaded, setPendingLoaded] = useState(false);
+  const [pendingAutoApply, setPendingAutoApply] = useState(null);
 
   // Outbox for optimistic background submission (local-only)
   const OUTBOX_KEY = 'Quotation:outbox';
@@ -328,6 +331,20 @@ export default function Quotation() {
   useEffect(() => { const onOnline = () => retryOutbox(); window.addEventListener('online', onOnline); return () => window.removeEventListener('online', onOnline); }, []);
 
   const executiveName = Form.useWatch("executive", form) || userStaffName || "";
+  const executivePhone = useMemo(() => {
+    const norm = (s) => String(s || '').trim().toLowerCase();
+    const target = norm(executiveName);
+    if (!target) return "";
+    const matchByName = (list) => (list || []).find((e) => norm(e?.name) === target);
+    const found = matchByName(execOptions) || matchByName(EXECUTIVES);
+    if (found?.phone) return String(found.phone);
+    try {
+      const curUser = JSON.parse(localStorage.getItem('user') || 'null');
+      const curName = norm(curUser?.formDefaults?.staffName || curUser?.name || '');
+      if (curName && curName === target) return String(curUser?.phone || '');
+    } catch { /* ignore */ }
+    return "";
+  }, [executiveName, execOptions]);
   // Restore defaults if branch/executive get cleared by a reset or fetch
   const watchedBranch = Form.useWatch('branch', form);
   const watchedExec = Form.useWatch('executive', form);
@@ -348,13 +365,7 @@ export default function Quotation() {
   };
 
   const pageRef = useRef(null);
-  const printDate = useMemo(() => {
-    const d = new Date();
-    const dd = String(d.getDate()).padStart(2, "0");
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const yyyy = d.getFullYear();
-    return `${dd}/${mm}/${yyyy}`;
-  }, []);
+  const printDate = useMemo(() => dayjs().format("DD-MM-YYYY HH:mm"), []);
 
   // helper to make image paths absolute for the print iframe + cache-bust
   const absBust = (p) => {
@@ -525,12 +536,102 @@ export default function Quotation() {
     }
   };
 
-  useEffect(() => {
-    if (brand === "NH") {
-      form.setFieldsValue({ executive: MEGHANA_NAME });
-      form.setFieldsValue({ branch: BRANCH_NAME });
+  const pendingBranch = useMemo(
+    () => watchedBranch || defaultBranchName || '',
+    [watchedBranch, defaultBranchName]
+  );
+  const pendingBranchReady = useMemo(
+    () => Boolean(String(pendingBranch || '').trim()),
+    [pendingBranch]
+  );
+  const pendingCount = pendingLoaded ? pendingItems.length : null;
+
+  const normalizePendingRow = (row) => {
+    const values = row?.values || row || {};
+    const payloadRaw =
+      row?.payload ||
+      values.Payload ||
+      values.payload ||
+      values.PAYLOAD ||
+      row?.Payload ||
+      row?.PAYLOAD ||
+      '';
+    let payload = {};
+    try { payload = typeof payloadRaw === 'object' ? payloadRaw : JSON.parse(String(payloadRaw || '{}')); } catch { payload = {}; }
+    const fv = payload.formValues || payload.values || {};
+    const followUp = payload.followUp || payload.followup || {};
+    const status = String(followUp.status || values.Status || values.status || 'pending').toLowerCase();
+    const pick = (obj, keys) => {
+      for (const k of keys) {
+        const v = obj?.[k];
+        if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();
+      }
+      return '';
+    };
+    const followUpAtRaw =
+      followUp.at ||
+      followUp.followUpAt ||
+      values['Follow-up At'] ||
+      values['Follow Up At'] ||
+      values['Followup At'] ||
+      values['Follow-up Date'] ||
+      values['Follow Up Date'] ||
+      values['Followup Date'] ||
+      '';
+    const followUpAt = (() => {
+      if (!followUpAtRaw) return '';
+      const d = dayjs(followUpAtRaw, ["DD-MM-YYYY HH:mm","DD/MM/YYYY HH:mm","DD-MM-YYYY","DD/MM/YYYY", dayjs.ISO_8601], true);
+      return d.isValid() ? d.format('DD-MM-YYYY HH:mm') : String(followUpAtRaw);
+    })();
+    return {
+      serial: fv.serialNo || pick(values, ['Quotation No.', 'Quotation No', 'Quotation_ID', 'Quotation ID', 'Serial']) || '-',
+      name: fv.name || pick(values, ['Customer_Name', 'Customer Name', 'Name']) || '-',
+      mobile: String(fv.mobile || pick(values, ['Mobile', 'Mobile Number', 'Phone']) || '').replace(/\D/g, '').slice(-10),
+      vehicle: [fv.company || payload.company || values.Company, fv.bikeModel || payload.model || values.Model, fv.variant || payload.variant || values.Variant].filter(Boolean).join(' ') || '-',
+      branch: fv.branch || payload.branch || values.Branch || values['Branch Name'] || '-',
+      followUpAt,
+      followUpNotes: followUp.notes || values['Follow-up Notes'] || values['Follow Up Notes'] || values['Followup Notes'] || '',
+      status,
+      payload,
+    };
+  };
+
+  const loadPendingCases = async ({ silent = false } = {}) => {
+    if (!QUOT_GAS_URL) return;
+    if (!pendingBranchReady) {
+      setPendingItems([]);
+      setPendingLoaded(false);
+      return;
     }
-  }, [brand, form]);
+    if (!silent) setPendingLoading(true);
+    try {
+      const base = { action: 'list', page: 1, pageSize: 500 };
+      const filters = pendingBranch ? { branch: pendingBranch } : {};
+      const resp = await saveBookingViaWebhook({ webhookUrl: QUOT_GAS_URL, method: 'GET', payload: { ...base, ...filters } });
+      const js = resp?.data || resp;
+      const rows = Array.isArray(js?.data) ? js.data : (Array.isArray(js?.rows) ? js.rows : []);
+      const mapped = rows.map(normalizePendingRow).filter((r) => r && r.serial !== '-');
+      const pendingOnly = mapped.filter((r) => !r.status || r.status === 'pending');
+      setPendingItems(pendingOnly);
+      setPendingLoaded(true);
+    } catch {
+      setPendingItems([]);
+      setPendingLoaded(true);
+    } finally {
+      if (!silent) setPendingLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!pendingBranchReady) {
+      setPendingItems([]);
+      setPendingLoaded(false);
+      return;
+    }
+    setPendingItems([]);
+    setPendingLoaded(false);
+    loadPendingCases({ silent: true });
+  }, [pendingBranchReady, pendingBranch]);
 
   useEffect(() => {
     if (vehicleType === "scooter") {
@@ -541,25 +642,36 @@ export default function Quotation() {
   }, [vehicleType]);
 
   const companies = useMemo(
-    () => uniqNoCaseSorted(bikeData.map((r) => r.company)),
+    () => uniqCaseInsensitive(bikeData.map((r) => r.company)),
     [bikeData]
   );
-  const models = useMemo(
-    () => uniqNoCaseSorted(bikeData.filter((r) => r.company === company).map((r) => r.model)),
-    [bikeData, company]
-  );
-  const variants = useMemo(
-    () =>
-      uniqNoCaseSorted(
-        bikeData.filter((r) => r.company === company && r.model === model).map((r) => r.variant)
-      ),
-    [bikeData, company, model]
-  );
+  const models = useMemo(() => {
+    const compKey = normalizeKey(company);
+    const base = compKey
+      ? bikeData.filter((r) => normalizeKey(r.company) === compKey)
+      : bikeData;
+    return uniqCaseInsensitive(base.map((r) => r.model));
+  }, [bikeData, company]);
+  const variants = useMemo(() => {
+    const compKey = normalizeKey(company);
+    const modelKey = normalizeKey(model);
+    const base = bikeData.filter((r) => {
+      if (compKey && normalizeKey(r.company) !== compKey) return false;
+      if (modelKey && normalizeKey(r.model) !== modelKey) return false;
+      return true;
+    });
+    return uniqCaseInsensitive(base.map((r) => r.variant));
+  }, [bikeData, company, model]);
 
   const handleVariant = (v) => {
     setVariant(v);
     if (!manual) {
-      const found = bikeData.find((r) => r.company === company && r.model === model && r.variant === v);
+      const compKey = normalizeKey(company);
+      const modelKey = normalizeKey(model);
+      const variantKey = normalizeKey(v);
+      const found = bikeData.find(
+        (r) => normalizeKey(r.company) === compKey && normalizeKey(r.model) === modelKey && normalizeKey(r.variant) === variantKey
+      );
       const price = found?.onRoadPrice || 0;
       form.setFieldsValue({ onRoadPrice: price });
       setOnRoadPrice(price);
@@ -847,7 +959,6 @@ export default function Quotation() {
 
   const resetForm = () => {
     form.resetFields();
-    setBrand("SHANTHA");
     setCompany("");
     setModel("");
     setVariant("");
@@ -963,7 +1074,7 @@ export default function Quotation() {
       if (label) vehicleLines.push(`V${i + 2}: ${label}`);
     });
     const fittingsLine = Array.isArray(fittings) && fittings.length
-      ? `Fittings: ${uniqNoCase(fittings.filter(Boolean)).join(", ")}`
+      ? `Fittings: ${Array.from(new Set(fittings.filter(Boolean))).join(", ")}`
       : "";
     const mergedRemarks = [
       String(v.remarks || "").trim(),
@@ -975,7 +1086,7 @@ export default function Quotation() {
     const payload = {
       version: 1,
       savedAt: new Date().toISOString(),
-      brand,                // "SHANTHA" | "NH"
+      brand: "MOTERA",
       mode,                 // "cash" | "loan"
       vehicleType,          // "scooter" | "motorcycle"
       fittings,             // array of strings
@@ -1065,7 +1176,7 @@ export default function Quotation() {
         return;
       }
 
-      const showroomName = (brand === "SHANTHA" ? "Shantha Motors" : "NH Motors");
+      const showroomName = "Motera";
       const name = (form.getFieldValue("name") || "-").trim();
 
       // V1 (main)
@@ -1089,12 +1200,11 @@ export default function Quotation() {
         })),
       ];
 
-      // Resolve executive name & phone for WhatsApp footer
-      // Always use the logged-in staff's own name and phone; ignore legacy mappings
+      // Resolve executive name & phone for WhatsApp footer (prefer selected executive)
       const curUser = (() => { try { return JSON.parse(localStorage.getItem('user')||'null'); } catch { return null; } })();
-      const execPhone = String(curUser?.phone || '').replace(/\D/g,'');
-      const execNameDisplay = (v.executive || curUser?.formDefaults?.staffName || curUser?.name || executiveName || '-');
-      const qDate = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+      const execPhone = String(executivePhone || '').replace(/\D/g,'');
+      const execNameDisplay = (v.executive || executiveName || curUser?.formDefaults?.staffName || curUser?.name || '-');
+      const qDate = dayjs().format("DD-MM-YYYY HH:mm");
 
       // Header
       const header = [
@@ -1168,10 +1278,18 @@ export default function Quotation() {
 
   // ---------- Extra Vehicles UI Helpers ----------
   const filteredModels = (comp) =>
-    uniqNoCaseSorted(bikeData.filter((r) => r.company === comp).map((r) => r.model));
+    uniqCaseInsensitive(
+      bikeData
+        .filter((r) => normalizeKey(r.company) === normalizeKey(comp))
+        .map((r) => r.model)
+    );
 
   const filteredVariants = (comp, mdl) =>
-    uniqNoCaseSorted(bikeData.filter((r) => r.company === comp && r.model === mdl).map((r) => r.variant));
+    uniqCaseInsensitive(
+      bikeData
+        .filter((r) => normalizeKey(r.company) === normalizeKey(comp) && normalizeKey(r.model) === normalizeKey(mdl))
+        .map((r) => r.variant)
+    );
 
   const onExtraChange = (idx, patch) => {
     setExtraVehicles((prev) => {
@@ -1181,7 +1299,9 @@ export default function Quotation() {
       // if sheet mode and variant changes -> auto price
       if (!manual && patch.variant) {
         const found = bikeData.find(
-          (r) => r.company === (cur.company || "") && r.model === (cur.model || "") && r.variant === patch.variant
+          (r) => normalizeKey(r.company) === normalizeKey(cur.company || "") &&
+            normalizeKey(r.model) === normalizeKey(cur.model || "") &&
+            normalizeKey(r.variant) === normalizeKey(patch.variant)
         );
         if (found) {
           cur.onRoadPrice = found.onRoadPrice || 0;
@@ -1209,7 +1329,7 @@ export default function Quotation() {
 
   const addVehicle = () => {
     setExtraVehicles((prev) => {
-      if (prev.length >= 2) return prev;
+      if (prev.length >= 3) return prev;
       return [...prev, makeEmptyVehicle()];
     });
   };
@@ -1257,10 +1377,7 @@ export default function Quotation() {
                   }}
                 >
                   <Form.Item label="Brand on Print" style={{ marginBottom: 0 }}>
-                    <Radio.Group value={brand} onChange={(e)=>setBrand(e.target.value)}>
-                      <Radio value="SHANTHA">Shantha Motors</Radio>
-                      <Radio value="NH">NH Motors (Honda)</Radio>
-                    </Radio.Group>
+                    <div style={{ fontWeight: 600 }}>Motera</div>
                   </Form.Item>
                   {/* Right-side stacked buttons */}
                   <div className="brand-actions" style={{ display: "flex", flexDirection: "row", gap: 8, alignItems: 'center' }}>
@@ -1268,7 +1385,6 @@ export default function Quotation() {
                       form={form}
                       webhookUrl={QUOT_GAS_URL}
                       EXECUTIVES={EXECUTIVES}
-                      setBrand={setBrand}
                       setMode={setMode}
                       setVehicleType={setVehicleType}
                       setFittings={setFittings}
@@ -1283,14 +1399,71 @@ export default function Quotation() {
                       setFollowUpEnabled={setFollowUpEnabled}
                       setFollowUpAt={setFollowUpAt}
                       setFollowUpNotes={setFollowUpNotes}
+                      autoApply={pendingAutoApply}
                       buttonText="Fetch Details"
                       buttonProps={{
                         style: { background: "#2ECC71", borderColor: "#2ECC71", color: "#fff" },
                       }}
                     />
+                    <Button
+                      onClick={async () => {
+                        setPendingOpen(true);
+                        await loadPendingCases();
+                      }}
+                    >
+                      {pendingCount === null ? "PendingCases" : `PendingCases (${pendingCount})`}
+                    </Button>
                   </div>
                 </div>
               </Col>
+              <Modal
+                title={pendingCount !== null ? `PendingCases (${pendingCount})` : "PendingCases"}
+                open={pendingOpen}
+                onCancel={() => setPendingOpen(false)}
+                footer={[
+                  <Button key="refresh" onClick={() => loadPendingCases()}>Refresh</Button>,
+                  <Button key="close" type="primary" onClick={() => setPendingOpen(false)}>Close</Button>,
+                ]}
+              >
+                {pendingLoading ? (
+                  <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
+                    <Spin />
+                  </div>
+                ) : pendingItems.length ? (
+                  <List
+                    size="small"
+                    dataSource={pendingItems}
+                    renderItem={(item) => (
+                      <List.Item
+                        actions={[
+                          <Button
+                            size="small"
+                            type="primary"
+                            onClick={() => {
+                              if (!item?.payload) return;
+                              setPendingAutoApply({ payload: item.payload, token: Date.now() });
+                              setPendingOpen(false);
+                              setPendingItems((prev) => prev.filter((p) => p.serial !== item.serial));
+                            }}
+                          >
+                            Open
+                          </Button>,
+                        ]}
+                      >
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 2, width: "100%" }}>
+                          <div style={{ fontWeight: 600 }}>{item.name || "-"}</div>
+                          <div>📞 {item.mobile || "-"} | 🧾 {item.serial || "-"}</div>
+                          <div>🏍️ {item.vehicle || "-"} | 🏢 {item.branch || "-"}</div>
+                          {item.followUpAt ? <div>🗓️ {item.followUpAt}</div> : null}
+                          {item.followUpNotes ? <div style={{ color: "#666" }}>{item.followUpNotes}</div> : null}
+                        </div>
+                      </List.Item>
+                    )}
+                  />
+                ) : (
+                  <div style={{ color: "#666" }}>No pending quotations.</div>
+                )}
+              </Modal>
 
               {/* Toggle manual/sheet mode for vehicle selection */}
               <Col span={24}>
@@ -1609,7 +1782,7 @@ export default function Quotation() {
               <Col span={24}>
                 <Divider orientation="left">Additional Vehicles</Divider>
                 {extraVehicles.map((ev, idx) => {
-                  const idx1 = idx + 2; // Vehicle 2/3
+                  const idx1 = idx + 2; // Vehicle 2..4
                   const evModels = manual ? [] : filteredModels(ev.company);
                   const evVariants = manual ? [] : filteredVariants(ev.company, ev.model);
                   const tset = tenuresForSet(ev.emiSet || "12");
@@ -1742,12 +1915,12 @@ export default function Quotation() {
                 <Button
                   icon={<PlusOutlined />}
                   onClick={addVehicle}
-                  disabled={extraVehicles.length >= 2}
+                  disabled={extraVehicles.length >= 3}
                 >
                   Add Vehicle
                 </Button>
-                {extraVehicles.length >= 2 && (
-                  <span style={{ marginLeft: 8, color: "#666" }}>(Maximum 3 vehicles per quotation)</span>
+                {extraVehicles.length >= 3 && (
+                  <span style={{ marginLeft: 8, color: "#666" }}>(Maximum 4 vehicles per quotation)</span>
                 )}
               </Col>
 
@@ -1844,50 +2017,28 @@ export default function Quotation() {
                       textOverflow: "ellipsis",
                     }}
                   >
-                    {brand === "SHANTHA" ? (
-                      <>
-                        <div className="title-kn" style={{ fontSize: "25pt", fontWeight: 800 }}>
-                          ಶಾಂತ ಮೋಟರ್ಸ್
-                        </div>
-                        <div className="title-en" style={{ fontSize: "20pt", fontWeight: 800 }}>
-                          Shantha Motors
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="title-knhonda" style={{ fontSize: "25pt", fontWeight: 800 }}>
-                          ಎನ್ ಎಚ್ ಮೋಟರ್ಸ್
-                        </div>
-                        <div className="title-en" style={{ fontSize: "18pt", fontWeight: 700 }}>
-                          NH Motors
-                        </div>
-                      </>
-                    )}
+                    <>
+                      <div className="title-kn" style={{ fontSize: "25pt", fontWeight: 800 }}>
+                        ಮೋಟೆರಾ
+                      </div>
+                      <div className="title-en" style={{ fontSize: "20pt", fontWeight: 800 }}>
+                        Motera
+                      </div>
+                    </>
                   </div>
 
                   {/* Addresses + mobile */}
-                  {brand === "SHANTHA" ? (
-                    <>
-                      <div className="addr-line" style={{ fontSize: "13pt" }}>
-                        • Muddinapalya • Hegganahalli   • Nelagadrahalli  • Andrahalli
-                      </div>
-                      <div className="addr-line" style={{ fontSize: "13pt" }}>
-                        • Kadabagere   • Channenahali  • Tavarekere 
-                      </div>
-                      <div style={{ marginTop: 6, fontWeight: 600 }}>
-                        Mob: 9731366921 / 8073283502 / 9035131806
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="addr-linehonda" style={{ fontSize: "12pt" }}>
-                        Site No. 116/1, Bydarahalli, Magadi Main Road, Opp. HP Petrol Bunk, Bangalore - 560091
-                      </div>
-                      <div style={{ marginTop: 6, fontWeight: 600 }}>
-                        Mob: 9731366921 / 8073283502 / 9741609799
-                      </div>
-                    </>
-                  )}
+                  <>
+                    <div className="addr-line" style={{ fontSize: "13pt" }}>
+                      • Muddinapalya • Hegganahalli • Nelagadrahalli • Andrahalli
+                    </div>
+                    <div className="addr-line" style={{ fontSize: "13pt" }}>
+                      • Kadabagere • Channenahali • Tavarekere
+                    </div>
+                    <div style={{ marginTop: 6, fontWeight: 600 }}>
+                      Mob: 9731366921 / 8073283502 / 9035131806
+                    </div>
+                  </>
                 </div>
 
                 {/* RIGHT: logo only */}
@@ -1902,7 +2053,7 @@ export default function Quotation() {
                   }}
                 >
                   <img
-                    src={brand === "SHANTHA" ? "/motera-logoprint.jpg" : "/honda-logo.png"}
+                    src="/motera-logoprint.jpg"
                     alt="Brand Logo"
                     style={{
                       height: 130,
@@ -2016,10 +2167,7 @@ export default function Quotation() {
             <div className="box" style={{ marginBottom: 8 }}>
               <div style={{ marginBottom: 6, fontSize: "13pt", fontWeight: 700 }}>
                 <b>Executive name:</b> {executiveName || "-"}
-                {(() => {
-                  const found = EXECUTIVES.find((e) => e.name === executiveName);
-                  return found ? ` (${found.phone})` : "";
-                })()}
+                {executivePhone ? ` (${executivePhone})` : ""}
               </div>
 
               <div
@@ -2045,7 +2193,7 @@ export default function Quotation() {
                   }}
                 >
                   <img
-                    src={"/shantha-access.png"}
+                    src={"/motera-access.png"}
                     alt="Accessories"
                     style={{ height: 140, margin: "6px 0" }}
                   />

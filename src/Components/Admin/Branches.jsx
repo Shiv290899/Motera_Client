@@ -1,8 +1,7 @@
 import React from "react";
-import { Table, Button, Space, Modal, Form, Input, Select, message, Tag, Row, Col, Typography, Tooltip } from "antd";
+import { Table, Button, Space, Modal, Form, Input, Select, message, Tag, Row, Col } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import { listBranches, listBranchesPublic, createBranch, updateBranch, deleteBranch } from "../../apiCalls/branches";
-import { uniqNoCaseSorted } from "../../utils/uniqNoCase";
 
 const TYPE_OPTIONS = [
   { label: "Sales & Services", value: "sales & services" },
@@ -16,6 +15,62 @@ const STATUS_OPTIONS = [
   { label: "Under Maintenance", value: "under_maintenance" },
 ];
 
+const parseTeamEntries = (value) => {
+  if (value === undefined || value === null) return [];
+  const source = Array.isArray(value) ? value : String(value || "");
+  const candidates = Array.isArray(source)
+    ? source
+    : source.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean);
+  const seen = new Map();
+  candidates.forEach((segment) => {
+    if (!segment) return;
+    if (typeof segment === "object") {
+      const name = String(segment.name || segment.value || "").trim();
+      if (!name) return;
+      const phone = String(segment.phone || segment.contact || segment.mobile || "").replace(/\D/g, "");
+      const key = name.toLowerCase();
+      if (seen.has(key)) return;
+      seen.set(key, phone ? { name, phone } : { name });
+      return;
+    }
+    const raw = String(segment || "").trim();
+    if (!raw) return;
+    const parts = raw.split(/[|:]/).map((p) => p.trim()).filter(Boolean);
+    const name = parts[0];
+    if (!name) return;
+    const phone = parts.slice(1).join("").replace(/\D/g, "");
+    const key = name.toLowerCase();
+    if (seen.has(key)) return;
+    const entry = phone ? { name, phone } : { name };
+    seen.set(key, entry);
+  });
+  return Array.from(seen.values());
+};
+
+const formatTeamEntries = (list) => {
+  if (!Array.isArray(list) || !list.length) return "";
+  return list
+    .map((item) => {
+      if (!item?.name) return "";
+      return item.phone ? `${item.name} | ${item.phone}` : item.name;
+    })
+    .filter(Boolean)
+    .join("\n");
+};
+
+const renderTeamCell = (list) => {
+  if (!Array.isArray(list) || !list.length) return <span style={{ color: "#6b7280" }}>—</span>;
+  const items = list.map((item) => item?.name).filter(Boolean);
+  if (!items.length) return <span style={{ color: "#6b7280" }}>—</span>;
+  const preview = items.slice(0, 2).join(", ");
+  return (
+    <span style={{ fontSize: 12 }}>
+      {preview}
+      {items.length > 2 ? ` + ${items.length - 2} more` : ""}
+    </span>
+  );
+};
+
 export default function Branches({ readOnly = false }) {
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -25,7 +80,6 @@ export default function Branches({ readOnly = false }) {
   const [editing, setEditing] = React.useState(null);
   const [form] = Form.useForm();
   const [q, setQ] = React.useState("");
-  const [cityFilter, setCityFilter] = React.useState("all");
   const [typeFilter, setTypeFilter] = React.useState("all");
   const [statusFilter, setStatusFilter] = React.useState("all");
   // Controlled pagination
@@ -73,25 +127,20 @@ export default function Branches({ readOnly = false }) {
   React.useEffect(() => { fetchList(); }, [fetchList]);
 
   // Derived filters + filtered data
-  const cities = React.useMemo(() => {
-    const uniq = uniqNoCaseSorted((items || []).map((b) => (b.address?.city ? String(b.address.city).trim() : "")).filter(Boolean));
-    return ["all", ...uniq];
-  }, [items]);
   const filtered = React.useMemo(() => {
     const s = String(q || "").toLowerCase();
     return (items || []).filter((b) => {
-      if (cityFilter !== 'all' && (String(b.address?.city || '') !== cityFilter)) return false;
       if (typeFilter !== 'all' && String(b.type || '') !== typeFilter) return false;
       if (statusFilter !== 'all' && String(b.status || '') !== statusFilter) return false;
       if (!s) return true;
-      const hay = [b.code, b.name, b.phone, b.email, b.address?.line1, b.address?.line2, b.address?.area, b.address?.city, b.address?.state]
+      const hay = [b.code, b.name]
         .map((x)=>String(x||'').toLowerCase());
       return hay.some((x)=>x.includes(s));
     });
-  }, [items, q, cityFilter, typeFilter, statusFilter]);
+  }, [items, q, typeFilter, statusFilter]);
 
   // Reset page on filters/search change
-  React.useEffect(() => { setPage(1); }, [q, cityFilter, typeFilter, statusFilter]);
+  React.useEffect(() => { setPage(1); }, [q, typeFilter, statusFilter]);
 
   const stats = React.useMemo(() => {
     const by = (key) => {
@@ -104,12 +153,10 @@ export default function Branches({ readOnly = false }) {
 
   const exportCsv = () => {
     const headers = [
-      'Code','Name','Type','Status','Phone','Email','Line1','Line2','Area','City','State','Pincode','Latitude','Longitude'
+      'Code', 'Name', 'Type', 'Status', 'Executives', 'Mechanics'
     ];
     const rows = filtered.map((b)=>[
-      b.code||'', b.name||'', b.type||'', b.status||'', b.phone||'', b.email||'',
-      b.address?.line1||'', b.address?.line2||'', b.address?.area||'', b.address?.city||'', b.address?.state||'', b.address?.pincode||'',
-      b.location?.coordinates?.[1] ?? '', b.location?.coordinates?.[0] ?? ''
+      b.code||'', b.name||'', b.type||'', b.status||'', formatTeamEntries(b.team?.executives), formatTeamEntries(b.team?.mechanics)
     ]);
     const csv = [headers, ...rows].map(r => r.map(v => (String(v).includes(',') ? `"${String(v).replace(/"/g,'""')}"` : String(v))).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -136,21 +183,10 @@ export default function Branches({ readOnly = false }) {
       code: row.code,
       name: row.name,
       type: row.type,
-      phone: row.phone,
-      email: row.email,
-      address_line1: row.address?.line1,
-      address_line2: row.address?.line2,
-      area: row.address?.area,
-      city: row.address?.city,
-      state: row.address?.state,
-      pincode: row.address?.pincode,
-      lat: row.location?.coordinates?.[1],
-      lng: row.location?.coordinates?.[0],
       status: row.status,
-      manager: row.manager || undefined,
-      staffIds: Array.isArray(row.staff) ? row.staff.map(String).join(',') : undefined,
-      boysIds: Array.isArray(row.boys) ? row.boys.map(String).join(',') : undefined,
-      mechanicsIds: Array.isArray(row.mechanics) ? row.mechanics.map(String).join(',') : undefined,
+      executives: formatTeamEntries(row.team?.executives),
+      mechanics: formatTeamEntries(row.team?.mechanics),
+      callboys: formatTeamEntries(row.team?.callboys),
     });
     setModalOpen(true);
   };
@@ -184,24 +220,17 @@ export default function Branches({ readOnly = false }) {
         code: vals.code,
         name: vals.name,
         type: vals.type,
-        phone: vals.phone,
-        email: vals.email,
-        address: {
-          line1: vals.address_line1,
-          line2: vals.address_line2,
-          area: vals.area,
-          city: vals.city,
-          state: vals.state,
-          pincode: vals.pincode,
-        },
-        lat: vals.lat,
-        lng: vals.lng,
         status: vals.status,
-        ...(vals.manager ? { manager: String(vals.manager).trim() } : {}),
-        ...(vals.staffIds ? { staff: String(vals.staffIds).split(',').map(s => s.trim()).filter(Boolean) } : {}),
-        ...(vals.boysIds ? { boys: String(vals.boysIds).split(',').map(s => s.trim()).filter(Boolean) } : {}),
-        ...(vals.mechanicsIds ? { mechanics: String(vals.mechanicsIds).split(',').map(s => s.trim()).filter(Boolean) } : {}),
       };
+      const team = {};
+      const addTeamField = (key, value) => {
+        const entries = parseTeamEntries(value);
+        if (entries.length) team[key] = entries;
+      };
+      addTeamField('executives', vals.executives);
+      addTeamField('mechanics', vals.mechanics);
+      addTeamField('callboys', vals.callboys);
+      if (Object.keys(team).length) payload.team = team;
       setSaving(true);
       let res;
       if (editing?.id) res = await updateBranch(editing.id, payload);
@@ -227,31 +256,15 @@ export default function Branches({ readOnly = false }) {
     }
   };
 
-  const mapUrl = (b) => {
-    const parts = [b.address?.line1, b.address?.line2, b.address?.area, b.address?.city, b.address?.state, b.address?.pincode]
-      .filter(Boolean).join(', ');
-    if (!parts) return null; return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(parts)}`;
-  };
-
   const columns = [
     { title: "Code", dataIndex: "code", key: "code", width: 110, sorter: (a, b) => a.code.localeCompare(b.code) },
-    { title: "Name", dataIndex: "name", key: "name", sorter: (a, b) => a.name.localeCompare(b.name), render: (v,r)=> (
-      <span>
-        {v}{' '}
-        <Tooltip title="Open in Google Maps">
-          {mapUrl(r) && <a href={mapUrl(r)} target="_blank" rel="noopener" style={{ fontSize: 12, marginLeft: 4 }}>Map</a>}
-        </Tooltip>
-      </span>
-    ) },
+    { title: "Name", dataIndex: "name", key: "name", sorter: (a, b) => a.name.localeCompare(b.name) },
     { title: "Type", dataIndex: "type", key: "type", width: 150, render: (v) => {
       const color = v === 'sales' ? 'geekblue' : v === 'service' ? 'cyan' : 'blue';
       return <Tag color={color}>{v}</Tag>;
     } },
-    { title: "City", key: "city", width: 140, render: (_, r) => r.address?.city || "—" },
-    { title: "Phone", dataIndex: "phone", key: "phone", width: 140 },
-    { title: "Staff", key: "staffCount", width: 90, render: (v, r) => (r.activeStaffCount ?? (Array.isArray(r.staff) ? r.staff.length : 0)) },
-    { title: "Boys", key: "boysCount", width: 90, render: (v, r) => (r.activeBoysCount ?? (Array.isArray(r.boys) ? r.boys.length : 0)) },
-    { title: "Mechanics", key: "mechCount", width: 110, render: (v, r) => (r.activeMechanicsCount ?? (Array.isArray(r.mechanics) ? r.mechanics.length : 0)) },
+    { title: "Executives", dataIndex: "team", key: "executives", width: 180, render: (team) => renderTeamCell(team?.executives) },
+    { title: "Mechanics", dataIndex: "team", key: "mechanics", width: 180, render: (team) => renderTeamCell(team?.mechanics) },
     { title: "Status", dataIndex: "status", key: "status", width: 160, render: (v) => (
       v === "active" ? <Tag color="green">Active</Tag> : v === "inactive" ? <Tag>Inactive</Tag> : <Tag color="orange">Under Maintenance</Tag>
     ) },
@@ -272,8 +285,7 @@ export default function Branches({ readOnly = false }) {
     <div>
       <div style={{ display: "flex", gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
         <Space size={[8,8]} wrap>
-          <Input.Search placeholder="Search code/name/city/phone" allowClear value={q} onChange={(e)=>setQ(e.target.value)} style={{ minWidth: 220 }} />
-          <Select value={cityFilter} onChange={setCityFilter} style={{ minWidth: 160 }} options={cities.map(c=>({ value: c, label: c==='all'?'All Cities':c }))} />
+          <Input.Search placeholder="Search code/name" allowClear value={q} onChange={(e)=>setQ(e.target.value)} style={{ minWidth: 220 }} />
           <Select value={typeFilter} onChange={setTypeFilter} style={{ minWidth: 160 }} options={[{value:'all',label:'All Types'},...TYPE_OPTIONS]} />
           <Select value={statusFilter} onChange={setStatusFilter} style={{ minWidth: 180 }} options={[{value:'all',label:'All Status'},...STATUS_OPTIONS]} />
           <Button onClick={fetchList}>Refresh</Button>
@@ -347,82 +359,30 @@ export default function Branches({ readOnly = false }) {
                 <Select options={STATUS_OPTIONS} />
               </Form.Item>
             </Col>
-
-            <Col xs={24} sm={12}>
-              <Form.Item name="phone" label="Phone">
-                <Input placeholder="Branch phone" />
+          </Row>
+          <Row gutter={[12, 8]}>
+            <Col xs={24} sm={8}>
+              <Form.Item name="executives" label="Executives">
+                <Input.TextArea
+                  placeholder="Name per line (optional phone e.g., 'Ravi | 9731...')"
+                  rows={3}
+                />
               </Form.Item>
             </Col>
-            <Col xs={24} sm={12}>
-              <Form.Item name="email" label="Email">
-                <Input placeholder="Branch email" type="email" />
+            <Col xs={24} sm={8}>
+              <Form.Item name="mechanics" label="Mechanics">
+                <Input.TextArea
+                  placeholder="Mechanic name per line (phone optional)"
+                  rows={3}
+                />
               </Form.Item>
             </Col>
-
-            <Col span={24}>
-              <Form.Item name="address_line1" label="Address Line 1">
-                <Input />
-              </Form.Item>
-            </Col>
-            <Col span={24}>
-              <Form.Item name="address_line2" label="Address Line 2">
-                <Input />
-              </Form.Item>
-            </Col>
-
-            <Col xs={24} sm={12}>
-              <Form.Item name="area" label="Area">
-                <Input />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12}>
-              <Form.Item name="city" label="City" rules={[{ required: true, message: "City is required" }]}>
-                <Input />
-              </Form.Item>
-            </Col>
-
-            <Col xs={24} sm={12}>
-              <Form.Item name="state" label="State">
-                <Input />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12}>
-              <Form.Item name="pincode" label="Pincode">
-                <Input />
-              </Form.Item>
-            </Col>
-
-            <Col xs={24} sm={12}>
-              <Form.Item name="lat" label="Latitude">
-                <Input type="number" step="any" />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12}>
-              <Form.Item name="lng" label="Longitude">
-                <Input type="number" step="any" />
-              </Form.Item>
-            </Col>
-
-            {/* Associations (IDs). In a future iteration, replace with searchable pickers. */}
-            <Col xs={24} sm={12}>
-              <Form.Item name="manager" label="Manager (User ID)">
-                <Input placeholder="24-char user id (optional)" />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12}>
-              <Form.Item name="staffIds" label="Staff (comma-separated User IDs)">
-                <Input placeholder="id1,id2,id3" />
-              </Form.Item>
-            </Col>
-
-            <Col xs={24} sm={12}>
-              <Form.Item name="boysIds" label="Boys (comma-separated User IDs)">
-                <Input placeholder="id1,id2" />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12}>
-              <Form.Item name="mechanicsIds" label="Mechanics (comma-separated User IDs)">
-                <Input placeholder="id1,id2" />
+            <Col xs={24} sm={8}>
+              <Form.Item name="callboys" label="Callboys / Staff">
+                <Input.TextArea
+                  placeholder="Optional staff names (one per line)"
+                  rows={3}
+                />
               </Form.Item>
             </Col>
           </Row>

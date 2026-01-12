@@ -133,7 +133,7 @@ const HEADERS = [
 ];
 
 // 🔴 Master DailyCollections spreadsheet (one for all modules)
-const DC_MASTER_SPREADSHEET_ID = '1oYOaFhEr7PgdF0BDC5A4V2zfPPoFtnhbxcP16jMqiGs';
+const DC_MASTER_SPREADSHEET_ID = '1spc0pQTAMND9YkUXTyhFI-b2jVZmgKCcXQtrc1TFwFM';
 
 // ===================== CREATE / UPDATE =====================
 
@@ -572,6 +572,17 @@ function updateBooking_(bookingId, patch, mobileOpt) {
   if (patch.insuranceFileUrl != null) cells[idx(headers, 'Insurance File URL')] = String(patch.insuranceFileUrl);
 
   if (patch.rtoStatus != null) cells[idx(headers, 'RTO Status')] = String(patch.rtoStatus);
+
+  const chassis = (patch.chassis != null ? patch.chassis : patch.chassisNo);
+  if (patch.chassis != null || patch.chassisNo != null) {
+    cells[idx(headers, 'Chassis Number')] = String(chassis || '');
+    const rawIdx = idx(headers, 'Raw Payload');
+    var payload = {};
+    try { payload = JSON.parse(String(cells[rawIdx] || '{}')); } catch (e) { payload = {}; }
+    payload.vehicle = payload.vehicle || {};
+    payload.vehicle.chassisNo = String(chassis || '');
+    cells[rawIdx] = JSON.stringify(payload);
+  }
 
   const vehNo = patch.vehicleNo || patch.regNo;
   if (vehNo != null) cells[idx(headers, 'Vehicle No')] = String(vehNo);

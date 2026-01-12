@@ -1,5 +1,16 @@
 import { axiosInstance } from ".";
 
+const getOwnerId = () => {
+  try {
+    const raw = localStorage.getItem("user");
+    if (!raw) return null;
+    const user = JSON.parse(raw);
+    return user?.ownerId || user?.owner?.id || null;
+  } catch {
+    return null;
+  }
+};
+
 export const listBranches = async (params = {}) => {
   const { data, status } = await axiosInstance.get("/branches", {
     params,
@@ -9,8 +20,9 @@ export const listBranches = async (params = {}) => {
 };
 
 export const listBranchesPublic = async (params = {}) => {
+  const owner = getOwnerId();
   const { data, status } = await axiosInstance.get("/branches/public", {
-    params,
+    params: owner ? { ...params, owner } : params,
     validateStatus: () => true,
   });
   return { ...data, _status: status };

@@ -1,5 +1,5 @@
 // FetchJobcard.jsx
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Modal, Input, List, Space, Spin, message, Radio } from "antd";
 import { saveJobcardViaWebhook } from "../apiCalls/forms";
 import dayjs from "dayjs";
@@ -32,6 +32,9 @@ export default function FetchJobcard({
   setFollowUpAt,
   setFollowUpNotes,
   setPostServiceLock,
+  autoSearch,
+  prefillMode = "full", // full | basic
+  onAutoSearchStatusChange,
 }) {
   const JOB_SECRET = import.meta.env?.VITE_JOBCARD_GAS_SECRET || '';
   const [open, setOpen] = useState(false);
@@ -40,9 +43,15 @@ export default function FetchJobcard({
   const [loading, setLoading] = useState(false);
   const [matches, setMatches] = useState([]);
   const [notFoundText, setNotFoundText] = useState("");
+  const [ setApplyPrefillMode] = useState(prefillMode);
+  const applyModeRef = useRef(prefillMode);
 
   const { BRANCHES, MECHANIC, EXECUTIVES, VEHICLE_TYPES, SERVICE_TYPES } =
     useMemo(() => lists || {}, [lists]);
+  useEffect(() => {
+    applyModeRef.current = prefillMode;
+    setApplyPrefillMode(prefillMode);
+  }, [prefillMode]);
 
   // ---------- Column synonyms ----------
   const COL = useMemo(
@@ -108,19 +117,21 @@ export default function FetchJobcard({
     return stages.some((rx) => rx.test(v));
   };
 
-  const showNotFoundModal = () => {
+  const showNotFoundModal = (opts = {}) => {
+    const source = opts?.source;
+    const isInline = source === "inline";
     const pretty =
       mode === "vehicle"
         ? normalizeReg(query)
         : tenDigits(query) || String(query || "").trim();
     const label = mode === "vehicle" ? "vehicle number" : "mobile number";
     const txt = pretty
-      ? `The ${label} "${pretty}" is not in our job card records.`
-      : "No matching record found in our job card records.";
+      ? `No records found for ${label} "${pretty}".`
+      : "No records found.";
     setNotFoundText(txt);
     Modal.warning({
       centered: true,
-      title: "No job card found",
+      title: isInline ? "No records found" : "No job card found",
       content: txt,
       okText: "Got it",
     });
@@ -131,7 +142,18 @@ export default function FetchJobcard({
     if (!t) return null;
     const d = dayjs(
       t,
-      ["DD/MM/YYYY", "D/M/YYYY", "DD-MM-YYYY", "YYYY-MM-DD", dayjs.ISO_8601],
+      [
+        "DD-MM-YYYY HH:mm",
+        "D-M-YYYY HH:mm",
+        "DD/MM/YYYY HH:mm",
+        "D/M/YYYY HH:mm",
+        "DD-MM-YYYY",
+        "D-M-YYYY",
+        "DD/MM/YYYY",
+        "D/M/YYYY",
+        "YYYY-MM-DD",
+        dayjs.ISO_8601,
+      ],
       true
     );
     return d.isValid() ? d : null;
@@ -147,10 +169,33 @@ export default function FetchJobcard({
         "D/M/YYYY H:mm:ss",
         "DD/MM/YYYY H:mm:ss",
         "DD/MM/YYYY",
+        "D-M-YYYY H:mm:ss",
+        "DD-MM-YYYY H:mm:ss",
+        "DD-MM-YYYY HH:mm",
+        "DD-MM-YYYY",
       ],
       false
     );
     return d.isValid() ? d : dayjs(0);
+  };
+
+  const payloadTimestampMs = (payload) => {
+    const p = payload || {};
+    const fv = p.formValues || {};
+    const raw =
+      p.savedAt ||
+      p.createdAt ||
+      p.ts ||
+      p.timestamp ||
+      p.postServiceAt ||
+      fv.createdAt ||
+      fv.savedAt ||
+      fv.timestamp ||
+      fv.submittedAt ||
+      fv.expectedDelivery ||
+      "";
+    const d = dayjs(raw);
+    return d.isValid() ? d.valueOf() : 0;
   };
 
   const buildPostLockState = (payloadMaybe, valuesMaybe) => {
@@ -222,9 +267,10 @@ export default function FetchJobcard({
   };
 
   // ---------- Fetch rows (Webhook only) ----------
-  const fetchRows = async (queryOverride) => {
+  const fetchRows = async (queryOverride, modeOverride) => {
     if (!webhookUrl) throw new Error("Webhook URL not configured");
-    const payloadMode = mode === 'vehicle' ? 'reg' : 'mobile';
+    const modeNow = modeOverride || mode;
+    const payloadMode = modeNow === 'vehicle' ? 'reg' : (modeNow === 'jc' ? 'jc' : 'mobile');
     const qStr = String(queryOverride ?? query ?? '');
     const basePayload = JOB_SECRET
       ? { action: 'search', mode: payloadMode, query: qStr, secret: JOB_SECRET }
@@ -238,7 +284,7 @@ export default function FetchJobcard({
       console.warn('Webhook search failed:', e);
     }
     // If no rows and vehicle mode, try literal "vehicle"
-    if (!rows.length && mode === 'vehicle') {
+    if (!rows.length && modeNow === 'vehicle') {
       try {
         const altPayload = JOB_SECRET
           ? { action: 'search', mode: 'vehicle', query: qStr, secret: JOB_SECRET }
@@ -303,7 +349,7 @@ export default function FetchJobcard({
     const executiveRaw = pick(row, COL.Executive);
     const expectedDelivery = parseDDMMYYYY(pick(row, COL.ExpectedDelivery));
     const regNo = formatReg(pick(row, COL.RegNo), "");
-    const model = pick(row, COL.Model);
+    const model = String(pick(row, COL.Model) || "").toUpperCase();
     const colour = pick(row, COL.Colour);
     const kmDigits = pick(row, COL.KM).replace(/\D/g, "");
     const custName = pick(row, COL.CustName);
@@ -357,8 +403,33 @@ export default function FetchJobcard({
     return { fields, serviceType, vehicleType };
   };
 
+  const applyBasicFields = (fields = {}) => {
+    const next = {};
+    const regNo = formatReg(fields.regNo || "", "");
+    const mobile = String(fields.custMobile || "").replace(/\D/g, "").slice(-10);
+    if (regNo) next.regNo = regNo;
+    if (mobile) next.custMobile = mobile;
+    if (String(fields.custName || "").trim()) next.custName = fields.custName;
+    if (String(fields.model || "").trim()) next.model = String(fields.model).toUpperCase();
+    if (String(fields.colour || "").trim()) next.colour = fields.colour;
+    if (Object.keys(next).length) form.setFieldsValue(next);
+    if (regNo) setRegDisplay?.(regNo);
+    if (setPostServiceLock) {
+      setPostServiceLock({ locked: false, at: null, mobile: null, amount: null, mode: null });
+    }
+    message.success("Customer details pre-filled.");
+    setOpen(false);
+    setMatches([]);
+    setQuery("");
+  };
+
   const applyRowToForm = (row) => {
     const { fields, serviceType, vehicleType } = mapRowToForm(row);
+
+    if (applyModeRef.current === "basic") {
+      applyBasicFields(fields);
+      return;
+    }
 
     // sync UI toggles first (controls visibility)
     setServiceTypeLocal?.(serviceType || null);
@@ -388,6 +459,18 @@ export default function FetchJobcard({
   // Apply using our saved payload JSON (when fetched via webhook)
   const applyPayloadToForm = (p) => {
     try {
+      if (applyModeRef.current === "basic") {
+        const fv = p?.formValues || {};
+        applyBasicFields({
+          regNo: fv.regNo || "",
+          custMobile: String(fv.custMobile || "").replace(/\D/g, "").slice(-10),
+          custName: fv.custName || "",
+          model: String(fv.model || "").toUpperCase(),
+          colour: fv.colour || "",
+        });
+        return;
+      }
+
       const fv = p?.formValues || {};
       const serviceType = fv.serviceType || null;
       const vehicleType = fv.vehicleType || null;
@@ -406,9 +489,9 @@ export default function FetchJobcard({
         branch: fv.branch || undefined,
         mechanic: fv.mechanic || undefined,
         executive: fv.executive || undefined,
-        expectedDelivery: fv.expectedDelivery ? dayjs(fv.expectedDelivery, ["DD/MM/YYYY","YYYY-MM-DD", dayjs.ISO_8601], true) : null,
+        expectedDelivery: fv.expectedDelivery ? dayjs(fv.expectedDelivery, ["DD-MM-YYYY HH:mm","DD-MM-YYYY","DD/MM/YYYY","YYYY-MM-DD", dayjs.ISO_8601], true) : null,
         regNo: fv.regNo || '',
-        model: fv.model || '',
+        model: String(fv.model || "").toUpperCase(),
         colour: fv.colour || '',
         km: fv.km ? `${String(fv.km).replace(/\D/g,'')} KM` : '',
         fuelLevel: fv.fuelLevel || undefined,
@@ -445,26 +528,49 @@ export default function FetchJobcard({
     }
   };
 
+  const applyMatch = (item) => {
+    const isPayload = item && item.formValues;
+    if (isPayload) applyPayloadToForm(item);
+    else applyRowToForm(item);
+  };
+
   // ---------- search ----------
-  const runSearch = async () => {
-    const raw = (query || "").trim();
+  const runSearch = async (overrideQuery, modeOverride, prefillOverride, options = {}) => {
+    const modeNow = modeOverride || mode;
+    const nextPrefillMode = (typeof prefillOverride === "string" && prefillOverride) ? prefillOverride : prefillMode;
+    applyModeRef.current = nextPrefillMode;
+    setApplyPrefillMode(nextPrefillMode);
+    const autoPickLatest = !!options?.autoPickLatest;
+    const source = options?.source;
+    const isInline = source === "inline";
+    const rawOverride =
+      typeof overrideQuery === "string" || typeof overrideQuery === "number"
+        ? String(overrideQuery)
+        : undefined;
+    const raw = (rawOverride ?? query ?? "").trim();
     if (!raw) {
-      message.warning(mode === "vehicle" ? "Enter vehicle no. (KA03AB1234)" : "Enter a valid 10-digit mobile number.");
+      message.warning(modeNow === "vehicle" ? "Enter vehicle no. (KA03AB1234)" : modeNow === "jc" ? "Enter a valid Job Card number." : "Enter a valid 10-digit mobile number.");
+      if (isInline) onAutoSearchStatusChange?.(false, source);
       return;
     }
     let qNorm = raw;
-    if (mode === "vehicle") {
+    if (modeNow === "vehicle") {
       const reg = normalizeReg(raw);
       if (!VEH_RX.test(reg)) {
         message.warning("Enter vehicle no. as KA03AB1234.");
+        if (isInline) onAutoSearchStatusChange?.(false, source);
         return;
       }
       qNorm = reg;
       setQuery(reg);
+    } else if (modeNow === "jc") {
+      qNorm = raw;
+      setQuery(raw);
     } else {
       const digits = tenDigits(raw);
       if (!digits || digits.length !== 10) {
         message.warning("Enter a valid 10-digit mobile number.");
+        if (isInline) onAutoSearchStatusChange?.(false, source);
         return;
       }
       qNorm = digits;
@@ -472,28 +578,35 @@ export default function FetchJobcard({
     }
     setNotFoundText("");
     setLoading(true);
+    if (isInline) onAutoSearchStatusChange?.(true, source);
     try {
-      const result = await fetchRows(qNorm);
+      const result = await fetchRows(qNorm, modeNow);
       if (!result) throw new Error('No result');
       if (result.mode === 'webhook') {
         const rows = result.rows || [];
         if (!rows.length) {
-          showNotFoundModal();
+          showNotFoundModal({ source });
           setMatches([]);
           return;
         }
-        if (rows.length === 1) {
-          const p = rows[0]?.payload || rows[0];
+        const payloads = rows.map((r) => r?.payload || r);
+        if (autoPickLatest) {
+          const sorted = [...payloads].sort((a, b) => payloadTimestampMs(b) - payloadTimestampMs(a));
+          applyPayloadToForm(sorted[0]);
+          return;
+        }
+        if (payloads.length === 1) {
+          const p = payloads[0];
           applyPayloadToForm(p);
           return;
         }
-        setMatches(rows.map(r => r.payload || r).slice(0, 10));
+        setMatches(payloads.slice(0, 10));
         message.info(`Found ${rows.length} matches. Pick one.`);
         return;
       }
       const rows = result.rows;
       let candidates = [];
-      if (mode === "jc") {
+      if (modeNow === "jc") {
         // exact JC match
         candidates = rows.filter((r) => pick(r, COL.JCNo) === raw);
       } else {
@@ -508,7 +621,7 @@ export default function FetchJobcard({
       }
 
       if (!candidates.length) {
-        showNotFoundModal();
+        showNotFoundModal({ source });
         setMatches([]);
         return;
       }
@@ -517,6 +630,11 @@ export default function FetchJobcard({
       candidates.sort(
         (a, b) => parseTimestamp(b).valueOf() - parseTimestamp(a).valueOf()
       );
+
+      if (autoPickLatest) {
+        applyRowToForm(candidates[0]);
+        return;
+      }
 
       if (candidates.length === 1) {
         applyRowToForm(candidates[0]);
@@ -530,8 +648,26 @@ export default function FetchJobcard({
       message.error("Could not fetch job cards. Check the Apps Script/CSV link.");
     } finally {
       setLoading(false);
+      if (isInline) onAutoSearchStatusChange?.(false, source);
     }
   };
+
+  const lastAutoKeyRef = useRef("");
+  useEffect(() => {
+    const rawQuery = String(autoSearch?.query || "").trim();
+    if (!rawQuery) return;
+    const nextMode = (autoSearch?.mode === "vehicle" || autoSearch?.mode === "jc") ? autoSearch.mode : "mobile";
+    const nextKey = `${nextMode}:${rawQuery}:${autoSearch?.token || ""}`;
+    if (lastAutoKeyRef.current === nextKey) return;
+    lastAutoKeyRef.current = nextKey;
+    setMode(nextMode);
+    setQuery(rawQuery);
+    const shouldOpen = autoSearch?.openModal !== false;
+    setOpen(shouldOpen);
+    setTimeout(() => {
+      runSearch(rawQuery, nextMode, autoSearch?.prefill, { autoPickLatest: autoSearch?.autoPickLatest, source: autoSearch?.source });
+    }, 0);
+  }, [autoSearch]);
 
   return (
     <>
@@ -566,7 +702,7 @@ export default function FetchJobcard({
           >
             Close
           </Button>,
-          <Button key="search" type="primary" loading={loading} onClick={runSearch}>
+          <Button key="search" type="primary" loading={loading} onClick={() => runSearch()}>
             Search
           </Button>,
         ]}
@@ -581,23 +717,26 @@ export default function FetchJobcard({
           >
             <Radio.Button value="mobile">By Mobile</Radio.Button>
             <Radio.Button value="vehicle">By Vehicle No</Radio.Button>
+            <Radio.Button value="jc">By JC No</Radio.Button>
           </Radio.Group>
           <Input
-            placeholder={mode === "vehicle" ? "Enter Vehicle No (KA03AB1234)" : "Enter Mobile (10-digit)"}
+            placeholder={mode === "vehicle" ? "Enter Vehicle No (KA03AB1234)" : mode === "jc" ? "Enter JC No" : "Enter Mobile (10-digit)"}
             value={query}
-            inputMode={mode === "vehicle" ? "text" : "numeric"}
+            inputMode={mode === "vehicle" || mode === "jc" ? "text" : "numeric"}
             onChange={(e) => {
               const val = e.target.value || "";
               if (mode === "vehicle") {
                 const reg = val.toUpperCase().replace(/[^A-Z0-9]/g, "");
                 if (!isVehiclePartial(reg)) return;
                 setQuery(reg);
+              } else if (mode === "jc") {
+                setQuery(String(val || "").toUpperCase());
               } else {
                 const digits = String(val || "").replace(/\D/g, "").slice(0, 10);
                 setQuery(digits);
               }
             }}
-            onPressEnter={runSearch}
+            onPressEnter={() => runSearch()}
             allowClear
           />
 
@@ -624,11 +763,27 @@ export default function FetchJobcard({
                 const nm = isPayload ? (fv.custName || '—') : (pick(item, COL.CustName) || '—');
                 const mb = isPayload ? (String(fv.custMobile || '').replace(/\D/g,'').slice(-10) || '—') : (tenDigits(pick(item, COL.Mobile)) || '—');
                 const rn = isPayload ? (fv.regNo || '—') : (pick(item, COL.RegNo) || '—');
-                const ts = isPayload ? (fv.expectedDelivery || '-') : (parseTimestamp(item).format("DD/MM/YYYY HH:mm"));
+                const exp = isPayload ? parseDDMMYYYY(fv.expectedDelivery) : null;
+                const ts = isPayload
+                  ? (exp ? exp.format("DD-MM-YYYY HH:mm") : (fv.expectedDelivery || '-'))
+                  : (parseTimestamp(item).format("DD-MM-YYYY HH:mm"));
                 return (
                   <List.Item
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => applyMatch(item)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') applyMatch(item);
+                    }}
+                    style={{ cursor: 'pointer' }}
                     actions={[
-                      <Button type="link" onClick={() => (isPayload ? applyPayloadToForm(item) : applyRowToForm(item))}>
+                      <Button
+                        type="link"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          applyMatch(item);
+                        }}
+                      >
                         Use
                       </Button>,
                     ]}

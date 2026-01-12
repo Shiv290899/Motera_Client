@@ -1,18 +1,16 @@
 // components/MinorSalesPrintSheet.jsx
 import React, { forwardRef } from "react";
+import dayjs from "dayjs";
 
 function fmtDate(d) {
   try {
-    const dt = d instanceof Date ? d : new Date(d);
-    const dd = dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-    const tt = dt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
-    return `${dd} ${tt}`;
+    const dt = dayjs(d);
+    return dt.isValid() ? dt.format("DD-MM-YYYY HH:mm") : "-";
   } catch { return "-"; }
 }
 
 const MinorSalesPrintSheet = forwardRef(function MinorSalesPrintSheet({ active = true, vals = {} }, ref) {
   const branch = String(vals?.branchName || "").trim();
-  const isNH = branch === "Byadarahalli";
   const createdAt = vals?.dateTimeIso || new Date();
 
   const rows = Array.isArray(vals?.items) ? vals.items : [];
@@ -60,21 +58,13 @@ th { background: #fafafa; }
       <div className="wrap">
         <div className="box">
           <div className="hdr">
-            <img src={isNH ? "/honda-logo.png" : "/motera-logoprint.jpg"} alt="Logo" style={{ width: "100%", maxHeight: 92 }} />
+            <img src="/motera-logoprint.jpg" alt="Logo" style={{ width: "100%", maxHeight: 92 }} />
             <div className="shop">
-              {isNH ? (
-                <>
-                  <div className="en">NH MOTORS | ಎನ್ ಎಚ್ ಮೋಟರ್ಸ್</div>
-                  <div className="sub">Site No. 116/1, Bydarahalli, Magadi Main Road, Opp.<br/>HP Petrol Bunk, Bangalore - 560091</div>
-                  <div className="sub">Mob: 9731366921 / 8073283502 / 9741609799</div>
-                </>
-              ) : (
-                <>
-                  <div className="en">SHANTHA MOTORS | ಶಾಂತ ಮೋಟರ್ಸ್</div>
-                  <div className="sub">Multi Brand Two Wheeler Sales & Service</div>
-                  <div className="sub">Mob No : 9731366921 / 8073283502</div>
-                </>
-              )}
+              <>
+                <div className="en">MOTERA | ಮೋಟೆರಾ</div>
+                <div className="sub">Multi Brand Two Wheeler Sales & Service</div>
+                <div className="sub">Mob No : 9731366921 / 8073283502</div>
+              </>
             </div>
             <div>
               <img src="/location-qr.png" alt="QR" style={{ width: "100%", maxHeight: 92 }} />

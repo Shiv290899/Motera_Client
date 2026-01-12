@@ -62,7 +62,7 @@ export default function About() { // Default export of the About page
     { icon: <SmileOutlined />, title: "Customer-First", desc: "Every decision—from inventory to processes—centers your needs." },               // Card 2
     { icon: <ToolOutlined />, title: "Skilled Teams", desc: "Friendly advisors & trained technicians using only genuine parts." },              // Card 3
     { icon: <EnvironmentOutlined />, title: "Close to You", desc: "Strategic locations for quick access to sales & service." },                // Card 4
-    { icon: <CheckCircleOutlined />, title: "Consistent Quality", desc: "Every branch upholds the same high Shantha Motors standard." },       // Card 5
+    { icon: <CheckCircleOutlined />, title: "Consistent Quality", desc: "Every branch upholds the same high Motera standard." },       // Card 5
   ];
 
   const values = [
@@ -143,13 +143,13 @@ export default function About() { // Default export of the About page
             level={1}                              // H1
             style={{ color: "#fff", marginTop: 8, marginBottom: 10, fontSize: heroTitleSize }} // Responsive font
           >
-            About Shantha Motors                    {/* Page title */}
+            About Motera                    {/* Page title */}
           </Title>
           <Paragraph
             style={{ color: "#fff", opacity: 0.95, maxWidth: 860, fontSize: heroSubSize }} // Responsive subtitle
           >
             Founded by <Text strong style={{ color: "white" }}>Nagesh</Text>, an <Text strong style={{ color: "white" }}>NITK Civil Engineer</Text>,
-            Shantha Motors began with a single showroom and a bold mission: redefine the
+            Motera began with a single showroom and a bold mission: redefine the
             two-wheeler buying and ownership experience through trust, transparency, and joyful service.
           </Paragraph>
           <Tag color="magenta" style={{ fontWeight: 700 }}> {/* Badge line */}
@@ -168,7 +168,7 @@ export default function About() { // Default export of the About page
                   Our Story                         {/* Section title */}
                 </Title>
                 <Paragraph>
-                  In August 2022, Shantha Motors opened its doors in Bengaluru. From day one, we
+                  In August 2022, Motera opened its doors in Bengaluru. From day one, we
                   focused on more than vehicles—we built an experience. Our founder rolled up his
                   sleeves to set up operations from scratch: sourcing, layout, hiring, training,
                   and crafting processes rooted in <Text strong>trust</Text>,{" "}
@@ -179,8 +179,8 @@ export default function About() { // Default export of the About page
                   Today, we proudly operate <Text strong>10 showrooms</Text> across the city, and by the
                   end of <Text strong>2025</Text> we’re on track for <Text strong>15</Text>. Our long-term
                   vision is expansive: a resilient network of <Text strong>100+</Text> (and possibly{" "}
-                  <Text strong>200+</Text>) showrooms across Karnataka and beyond—bringing Shantha
-                  Motors quality within easy reach of every rider.
+                  <Text strong>200+</Text>) showrooms across Karnataka and beyond—bringing Motera
+                  quality within easy reach of every rider.
                 </Paragraph>
 
                 <Divider style={{ margin: isMobile ? "12px 0" : "16px 0" }} /> {/* Compact divider on mobile */}
@@ -279,7 +279,7 @@ export default function About() { // Default export of the About page
                 <Paragraph style={{ marginBottom: 0 }}>
                   To be the most trusted two-wheeler brand in Bengaluru and beyond—recognized
                   for quality vehicles, delightful service, and an ownership experience that
-                  feels effortless. Bringing Shantha Motors within 15–20 minutes of every rider.
+                  feels effortless. Bringing Motera within 15–20 minutes of every rider.
                 </Paragraph>
               </Card>
             </Col>
@@ -328,7 +328,7 @@ export default function About() { // Default export of the About page
       <section style={{ ...styles.section, background: "#faf6f8" }}> {/* Themed background */}
         <div style={styles.container}>            {/* Centered container */}
           <Title level={2} style={{ textAlign: "center" }}>
-            Why Riders Choose Shantha Motors          {/* Section title */}
+            Why Riders Choose Motera          {/* Section title */}
           </Title>
 
           <Row gutter={[16, 16]}>

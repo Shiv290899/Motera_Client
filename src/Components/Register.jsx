@@ -62,7 +62,7 @@ function Register() {
       <div className="auth-box">
         <Title level={2} className="title">Create your account</Title>
         <Text type="secondary" className="subtitle">
-          Join Shantha Motors to manage bookings and more.
+          Join Motera to manage bookings and more.
         </Text>
 
         <Form

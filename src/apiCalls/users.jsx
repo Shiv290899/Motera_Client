@@ -78,3 +78,28 @@ export const ResetPassword = async ({ token, password }) => {
     throw error;
   }
 };
+
+// Update owner profile (web app URL, logo, name/phone)
+export const UpdateOwnerProfile = async (payload) => {
+  try {
+    const { data, status } = await axiosInstance.put("/users/profile", payload, {
+      validateStatus: () => true,
+    });
+    return { ...data, _status: status };
+  } catch (error) {
+    console.error("UpdateOwnerProfile failed", error);
+    return { success: false, message: error?.message || "Profile update failed" };
+  }
+};
+
+export const BecomeOwner = async (payload = {}) => {
+  try {
+    const { data, status } = await axiosInstance.post("/users/become-owner", payload, {
+      validateStatus: () => true,
+    });
+    return { ...data, _status: status };
+  } catch (error) {
+    console.error("BecomeOwner failed", error);
+    return { success: false, message: error?.message || "Could not create owner profile" };
+  }
+};

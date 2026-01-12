@@ -4,6 +4,7 @@ import { listCurrentStocks, createStock, updateStock } from "../apiCalls/stocks"
 import BookingForm from "./BookingForm";
 import { listBranches, listBranchesPublic } from "../apiCalls/branches";
 import { exportToCsv } from "../utils/csvExport";
+import { normalizeText, normalizeKey, uniqCaseInsensitive, toKeySet } from "../utils/caseInsensitive";
 
 export default function InStockUpdate() {
   const screens = Grid.useBreakpoint();
@@ -40,12 +41,24 @@ export default function InStockUpdate() {
   const [editingRow, setEditingRow] = useState(null);
   const [editSaving, setEditSaving] = useState(false);
   const [editForm] = Form.useForm();
+  const [movementModalOpen, setMovementModalOpen] = useState(false);
+  const [movementAction, setMovementAction] = useState(null); // transfer | return
+  const [movementRow, setMovementRow] = useState(null);
+  const [movementSaving, setMovementSaving] = useState(false);
+  const [movementForm] = Form.useForm();
 
   // Vehicle catalog (for prefilled dropdowns in Edit)
   const CATALOG_CSV_URL = import.meta.env.VITE_VEHICLE_SHEET_CSV_URL ||
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vQYGuNPY_2ivfS7MTX4bWiu1DWdF2mrHSCnmTznZVEHxNmsrgcGWjVZN4UDUTOzQQdXTnbeM-ylCJbB/pub?gid=408799621&single=true&output=csv";
-  const HEADERS = { company: ["Company","Company Name"], model: ["Model","Model Name"], variant: ["Variant"], color: ["Color","Colours"] };
+  const HEADERS = { company: ["Company","Company Name"], model: ["Model","Model Name"], variant: ["Variant"], color: ["Color","Colours","Colors","Colour","Available Colors"] };
   const pick = (row, keys) => String(keys.map((k)=> row[k] ?? "").find((v)=> v !== "") || "").trim();
+  const splitColors = (value) => {
+    if (!value) return [];
+    return String(value)
+      .split(/[|,/;\n]+/)
+      .map((c) => c.trim())
+      .filter(Boolean);
+  };
   const normalizeCatalogRow = (row={}) => ({ company: pick(row, HEADERS.company), model: pick(row, HEADERS.model), variant: pick(row, HEADERS.variant), color: pick(row, HEADERS.color) });
   const parseCsv = (text) => { const rows=[]; let r=[],c="",q=false; for(let i=0;i<text.length;i++){ const ch=text[i],n=text[i+1]; if(ch==='"'&&!q){q=true;continue;} if(ch==='"'&&q){ if(n==='"'){c+='"';i++;continue;} q=false; continue;} if(ch===','&&!q){ r.push(c); c=""; continue;} if((ch==='\n'||ch==='\r')&&!q){ if(c!==""||r.length){ r.push(c); rows.push(r); r=[]; c="";} if(ch==='\r'&&n==='\n') i++; continue;} c+=ch;} if(c!==""||r.length){ r.push(c); rows.push(r);} return rows; };
   const fetchSheetRowsCSV = async (url) => { const res = await fetch(url, { cache: 'no-store' }); if(!res.ok) throw new Error('Sheet fetch failed'); const csv = await res.text(); if(csv.trim().startsWith('<')) throw new Error('Expected CSV, got HTML'); const rows=parseCsv(csv); if(!rows.length) return []; const headers = rows[0].map(h=> (h||'').trim()); return rows.slice(1).map(r=>{ const obj={}; headers.forEach((h,i)=> obj[h]= r[i] ?? ''); return obj; }); };
@@ -55,37 +68,32 @@ export default function InStockUpdate() {
   const [selModel, setSelModel] = useState("");
   const [selVariant, setSelVariant] = useState("");
   useEffect(()=>{ (async()=>{ try{ const raw=await fetchSheetRowsCSV(CATALOG_CSV_URL); const cleaned=raw.map(normalizeCatalogRow).filter(r=>r.company&&r.model&&r.variant); setCatalog(cleaned); setSheetOk(cleaned.length>0);} catch{ setCatalog([]); setSheetOk(false);} })(); },[]);
-  // Case-insensitive unique helper (preserves first seen casing for display)
-  const uniqNoCase = (arr) => {
-    const map = new Map();
-    arr.forEach((v) => {
-      const val = String(v || "").trim();
-      if (!val) return;
-      const key = val.toLowerCase();
-      if (!map.has(key)) map.set(key, val);
-    });
-    return Array.from(map.values()).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
-  };
-
-  const companyOptions = useMemo(()=> uniqNoCase(catalog.map(r=>r.company)), [catalog]);
-  const modelOptions = useMemo(()=> uniqNoCase(catalog.filter(r=>r.company===selCompany).map(r=>r.model)), [catalog, selCompany]);
-  const variantOptions = useMemo(()=> uniqNoCase(catalog.filter(r=>r.company===selCompany && r.model===selModel).map(r=>r.variant)), [catalog, selCompany, selModel]);
+  const companyOptions = useMemo(()=> [...new Set(catalog.map(r=>r.company))], [catalog]);
+  const modelOptions = useMemo(()=> [...new Set(catalog.filter(r=>r.company===selCompany).map(r=>r.model))], [catalog, selCompany]);
+  const variantOptions = useMemo(()=> [...new Set(catalog.filter(r=>r.company===selCompany && r.model===selModel).map(r=>r.variant))], [catalog, selCompany, selModel]);
   const colorOptions = useMemo(()=> {
-    const dyn=catalog.filter(r=>r.company===selCompany && r.model===selModel && r.variant===selVariant).map(r=>r.color).filter(Boolean);
-    return dyn.length? uniqNoCase(dyn): [];
+    const dyn = catalog
+      .filter(r=>r.company===selCompany && r.model===selModel && r.variant===selVariant)
+      .flatMap((r)=> splitColors(r.color));
+    const map = new Map();
+    dyn.forEach((c) => {
+      const key = String(c).toLowerCase();
+      if (!map.has(key)) map.set(key, c);
+    });
+    return Array.from(map.values());
   }, [catalog, selCompany, selModel, selVariant]);
 
   // Current user for prefill & createdBy
   const currentUser = useMemo(() => { try { return JSON.parse(localStorage.getItem('user')||'null'); } catch { return null; } }, []);
   const myRole = useMemo(() => String(currentUser?.role || '').toLowerCase(), [currentUser]);
-  const isAdminOwner = useMemo(() => ['admin'].includes(myRole), [myRole]);
+  const isAdminOwner = useMemo(() => ['admin', 'owner', 'backend'].includes(myRole), [myRole]);
 
   useEffect(() => {
     (async () => {
       try {
         const res = await listBranches({ limit: 100, status: "active" }).catch(() => null);
         const data = res?.data?.items || (await listBranchesPublic({ status: "active", limit: 100 })).data.items || [];
-        const names = uniqNoCase((data || []).map((b) => String(b?.name || "").trim()).filter(Boolean));
+        const names = uniqCaseInsensitive((data || []).map((b) => b?.name));
         setBranchOptions(names);
       } catch {
         setBranchOptions([]);
@@ -115,19 +123,20 @@ export default function InStockUpdate() {
     try {
       const resp = await listCurrentStocks({ branch: branch === "all" ? undefined : branch, limit: 1000 });
       const list = Array.isArray(resp?.data) ? resp.data : [];
-      const rows = list.map((r, i) => ({
-        key: r._id || r.movementId || i,
-        ts: r.timestamp || r.createdAt || "",
-        chassis: r.chassisNo || "",
-        company: r.company || "",
-        model: r.model || "",
-        variant: r.variant || "",
-        color: r.color || "",
-        branch: r.sourceBranch || r.branch || "",
-        status: r.status || "in stock",
-        movementId: r.movementId || r.lastMovementId || "",
-        lastMovementId: r.lastMovementId || r.movementId || "",
-      }));
+        const rows = list.map((r, i) => ({
+          key: r._id || r.movementId || i,
+          ts: r.timestamp || r.createdAt || "",
+          chassis: r.chassisNo || "",
+          company: r.company || "",
+          model: r.model || "",
+          variant: r.variant || "",
+          color: r.color || "",
+          branch: r.sourceBranch || r.branch || "",
+          status: r.status || "in stock",
+          movementId: r.movementId || r.lastMovementId || "",
+          lastMovementId: r.lastMovementId || r.movementId || "",
+          notes: r.notes || "",
+        }));
       setItems(rows);
       setHasCache(true);
       try {
@@ -147,59 +156,66 @@ export default function InStockUpdate() {
 
   // Build option lists whenever items change (unique, sorted)
   useEffect(() => {
-    setCompanies(uniqNoCase(items.map((r)=>r.company)));
-    setModels(uniqNoCase(items.map((r)=>r.model)));
-    setVariants(uniqNoCase(items.map((r)=>r.variant)));
-    setColors(uniqNoCase(items.map((r)=>r.color)));
+    setCompanies(uniqCaseInsensitive(items.map((r)=>r.company)));
+    setModels(uniqCaseInsensitive(items.map((r)=>r.model)));
+    setVariants(uniqCaseInsensitive(items.map((r)=>r.variant)));
+    setColors(uniqCaseInsensitive(items.map((r)=>r.color)));
   }, [items]);
-
-  // Helper for dependent option lists
-  const uniqList = (arr) => uniqNoCase(arr);
 
   // Dependent options for Model and Variant based on current selections
   const modelOptionsFiltered = useMemo(() => {
-    const base = selCompanies.length
-      ? items.filter((r) => selCompanies.includes(String(r.company || '').trim()))
+    const companySet = toKeySet(selCompanies);
+    const base = companySet.size
+      ? items.filter((r) => companySet.has(normalizeKey(r.company)))
       : items;
-    return uniqList(base.map((r) => r.model));
+    return uniqCaseInsensitive(base.map((r) => r.model));
   }, [items, selCompanies]);
 
   const variantOptionsFiltered = useMemo(() => {
-    const base1 = selCompanies.length
-      ? items.filter((r) => selCompanies.includes(String(r.company || '').trim()))
+    const companySet = toKeySet(selCompanies);
+    const base1 = companySet.size
+      ? items.filter((r) => companySet.has(normalizeKey(r.company)))
       : items;
-    const base2 = selModels.length
-      ? base1.filter((r) => selModels.includes(String(r.model || '').trim()))
+    const modelSet = toKeySet(selModels);
+    const base2 = modelSet.size
+      ? base1.filter((r) => modelSet.has(normalizeKey(r.model)))
       : base1;
-    return uniqList(base2.map((r) => r.variant));
+    return uniqCaseInsensitive(base2.map((r) => r.variant));
   }, [items, selCompanies, selModels]);
 
   // When upstream selections change, prune downstream selections so they remain valid
   const onCompaniesChange = (vals) => {
-    const base = vals.length
-      ? items.filter((r) => vals.includes(String(r.company || '').trim()))
+    const companySet = toKeySet(vals);
+    const base = companySet.size
+      ? items.filter((r) => companySet.has(normalizeKey(r.company)))
       : items;
-    const allowedModels = uniqList(base.map((r) => r.model));
-    const nextModels = selModels.filter((m) => allowedModels.includes(m));
-    const base2 = nextModels.length
-      ? base.filter((r) => nextModels.includes(String(r.model || '').trim()))
+    const allowedModels = uniqCaseInsensitive(base.map((r) => r.model));
+    const allowedModelSet = toKeySet(allowedModels);
+    const nextModels = selModels.filter((m) => allowedModelSet.has(normalizeKey(m)));
+    const nextModelSet = toKeySet(nextModels);
+    const base2 = nextModelSet.size
+      ? base.filter((r) => nextModelSet.has(normalizeKey(r.model)))
       : base;
-    const allowedVariants = uniqList(base2.map((r) => r.variant));
-    const nextVariants = selVariants.filter((v) => allowedVariants.includes(v));
+    const allowedVariants = uniqCaseInsensitive(base2.map((r) => r.variant));
+    const allowedVariantSet = toKeySet(allowedVariants);
+    const nextVariants = selVariants.filter((v) => allowedVariantSet.has(normalizeKey(v)));
     setSelModels(nextModels);
     setSelVariants(nextVariants);
     setSelCompanies(vals);
   };
 
   const onModelsChange = (vals) => {
-    const base1 = selCompanies.length
-      ? items.filter((r) => selCompanies.includes(String(r.company || '').trim()))
+    const companySet = toKeySet(selCompanies);
+    const base1 = companySet.size
+      ? items.filter((r) => companySet.has(normalizeKey(r.company)))
       : items;
-    const base2 = vals.length
-      ? base1.filter((r) => vals.includes(String(r.model || '').trim()))
+    const modelSet = toKeySet(vals);
+    const base2 = modelSet.size
+      ? base1.filter((r) => modelSet.has(normalizeKey(r.model)))
       : base1;
-    const allowedVariants = uniqList(base2.map((r) => r.variant));
-    const nextVariants = selVariants.filter((v) => allowedVariants.includes(v));
+    const allowedVariants = uniqCaseInsensitive(base2.map((r) => r.variant));
+    const allowedVariantSet = toKeySet(allowedVariants);
+    const nextVariants = selVariants.filter((v) => allowedVariantSet.has(normalizeKey(v)));
     setSelVariants(nextVariants);
     setSelModels(vals);
   };
@@ -210,6 +226,10 @@ export default function InStockUpdate() {
     const [start, end] = Array.isArray(dateRange) ? dateRange : [];
     const startTs = start && typeof start?.toDate === 'function' ? start.toDate() : null;
     const endTs = end && typeof end?.toDate === 'function' ? end.toDate() : null;
+    const selCompanySet = toKeySet(selCompanies);
+    const selModelSet = toKeySet(selModels);
+    const selVariantSet = toKeySet(selVariants);
+    const selColorSet = toKeySet(selColors);
 
     return items.filter((r) => {
       // Free-text search across key fields
@@ -220,13 +240,13 @@ export default function InStockUpdate() {
       }
 
       // Company/model/variant/color multi-select filters
-      const inCompanies = selCompanies.length ? selCompanies.includes(String(r.company || '').trim()) : true;
+      const inCompanies = selCompanySet.size ? selCompanySet.has(normalizeKey(r.company)) : true;
       if (!inCompanies) return false;
-      const inModels = selModels.length ? selModels.includes(String(r.model || '').trim()) : true;
+      const inModels = selModelSet.size ? selModelSet.has(normalizeKey(r.model)) : true;
       if (!inModels) return false;
-      const inVariants = selVariants.length ? selVariants.includes(String(r.variant || '').trim()) : true;
+      const inVariants = selVariantSet.size ? selVariantSet.has(normalizeKey(r.variant)) : true;
       if (!inVariants) return false;
-      const inColors = selColors.length ? selColors.includes(String(r.color || '').trim()) : true;
+      const inColors = selColorSet.size ? selColorSet.has(normalizeKey(r.color)) : true;
       if (!inColors) return false;
 
       // Date range on last movement timestamp
@@ -249,10 +269,15 @@ export default function InStockUpdate() {
   const availabilityByBranch = useMemo(() => {
     const map = new Map();
     (filtered || []).forEach((r) => {
-      const b = String(r.branch || "").trim() || "Unassigned";
-      map.set(b, (map.get(b) || 0) + 1);
+      const label = normalizeText(r.branch) || "Unassigned";
+      const key = normalizeKey(label) || "unassigned";
+      if (!map.has(key)) map.set(key, { label, count: 0 });
+      const entry = map.get(key);
+      entry.count += 1;
     });
-    return Array.from(map.entries()).sort((a,b)=>b[1]-a[1]);
+    return Array.from(map.values())
+      .sort((a,b)=>b.count - a.count)
+      .map(({ label, count }) => [label, count]);
   }, [filtered]);
 
   // Whenever filters/search/branch change, reset to first page
@@ -261,8 +286,96 @@ export default function InStockUpdate() {
   // Summary counts (independent of search filter)
   const totalCount = items.length;
   
+  const openBookingModal = (r) => {
+    const pre = {
+      company: r.company || '',
+      bikeModel: r.model || '',
+      variant: r.variant || '',
+      color: r.color || '',
+      chassisNo: r.chassis || '',
+      purchaseType: 'cash',
+      addressProofMode: 'aadhaar',
+      executive: (currentUser?.name || currentUser?.email || ''),
+      branch: r.branch || '',
+    };
+    setInvoicePrefill(pre);
+    setInvoiceBaseRow(r);
+    setInvoiceModalOpen(true);
+  };
+
+  const openEditModal = (r) => {
+    setEditingRow(r);
+    setEditModalOpen(true);
+    setSelCompany(r.company || '');
+    setSelModel(r.model || '');
+    setSelVariant(r.variant || '');
+    editForm.setFieldsValue({
+      company: r.company || undefined,
+      model: r.model || undefined,
+      variant: r.variant || undefined,
+      color: r.color || undefined,
+      notes: r.notes || undefined,
+    });
+  };
+
+  const openMovementModal = (nextAction, r) => {
+    setMovementAction(nextAction);
+    setMovementRow(r);
+    movementForm.resetFields();
+    setMovementModalOpen(true);
+  };
+
+  const closeMovementModal = () => {
+    setMovementModalOpen(false);
+    setMovementAction(null);
+    setMovementRow(null);
+    movementForm.resetFields();
+  };
+
+  const handleMovementSave = async () => {
+    if (!movementRow || !movementAction) {
+      message.warning('Select a vehicle first.');
+      return;
+    }
+    try {
+      const values = await movementForm.validateFields();
+      setMovementSaving(true);
+      const row = {
+        Chassis_No: String(movementRow.chassis || '').toUpperCase(),
+        Company: movementRow.company || '',
+        Model: movementRow.model || '',
+        Variant: movementRow.variant || '',
+        Color: movementRow.color || '',
+        Action: movementAction,
+        Source_Branch: movementRow.branch || '',
+        Notes: values.notes || '',
+      };
+      if (movementAction === 'transfer') row.Target_Branch = values.targetBranch || '';
+      if (movementAction === 'return') row.Return_To = values.returnTo || '';
+      const res = await createStock({ data: row, createdBy: currentUser?.name || currentUser?.email || 'user' });
+      if (res?.success) {
+        const msg = movementAction === 'transfer'
+          ? 'Transfer recorded and waiting for admit by the target branch.'
+          : 'Return recorded.';
+        message.success(msg);
+        closeMovementModal();
+        fetchData();
+      } else {
+        message.error(res?.message || 'Save failed');
+      }
+    } catch (e) {
+      if (e?.errorFields) return;
+      message.error('Save failed');
+    } finally {
+      setMovementSaving(false);
+    }
+  };
+
 
   const col = (v) => String(v || "").trim();
+  const stackStyle = { display: 'flex', flexDirection: 'column', gap: 2, lineHeight: 1.2 };
+  const lineStyle = { whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'anywhere' };
+  const smallLineStyle = { ...lineStyle, fontSize: 11, color: '#475569' };
   const colorDot = (name) => {
     const n = String(name || "").toLowerCase();
     // Handle specific variants first
@@ -304,60 +417,64 @@ export default function InStockUpdate() {
   };
 
   const baseColumns = [
-    { title: "Chassis", dataIndex: "chassis", key: "chassis", width: 30, ellipsis: false, render: (v)=> (
-      <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{v || '-'}</span>
-    ) },
-    { title: "Company", dataIndex: "company", key: "company", width: 20, ellipsis: false },
-    { title: "Model", dataIndex: "model", key: "model", width: 50, ellipsis: false },
-    { title: "Variant", dataIndex: "variant", key: "variant", width: 50, ellipsis: false },
-    { title: "Color", dataIndex: "color", key: "color", width: 50, render: (v) => colorDot(v) },
-    { title: "Branch", dataIndex: "branch", key: "branch", width: 50 },
-    { title: "Status", dataIndex: "status", key: "status", width: 50, render: (v) => <Tag color="green">{col(v) || 'in stock'}</Tag> },
+    {
+      title: "Chassis + Branch",
+      key: "chassisBranch",
+      width: isMobile ? undefined : 180,
+      render: (_, r) => (
+        <div style={stackStyle}>
+          <div style={{ ...lineStyle, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{r.chassis || '-'}</div>
+          <div style={smallLineStyle}>{r.branch || '-'}</div>
+        </div>
+      )
+    },
+    {
+      title: "Company || Model + Variant || Color",
+      key: "modelVariantColor",
+      width: isMobile ? undefined : 220,
+      render: (_, r) => {
+        const company = col(r.company);
+        const model = col(r.model);
+        const variant = col(r.variant);
+        const color = col(r.color);
+        return (
+          <div style={stackStyle}>
+            <div style={lineStyle}>{[company, model].filter(Boolean).join(' || ') || '-'}</div>
+            <div style={smallLineStyle}>
+              <span>{variant || '-'}</span>
+              <span>{variant && color ? ' || ' : ''}</span>
+              {color ? colorDot(color) : '-'}
+            </div>
+          </div>
+        );
+      }
+    },
   ];
 
   const actionsColumn = {
     title: "Actions",
     key: "actions",
-    width: 260,
+    width: isMobile ? undefined : 200,
     fixed: isMobile ? undefined : 'right',
     render: (_, r) => (
-      <Space size="small">
-        <Button size="small" type="primary" onClick={() => {
-          const pre = {
-            company: r.company || '',
-            bikeModel: r.model || '',
-            variant: r.variant || '',
-            color: r.color || '',
-            chassisNo: r.chassis || '',
-            purchaseType: 'cash',
-            addressProofMode: 'aadhaar',
-            executive: (currentUser?.name || currentUser?.email || ''),
-            branch: r.branch || '',
-          };
-          setInvoicePrefill(pre);
-          setInvoiceBaseRow(r);
-          setInvoiceModalOpen(true);
-        }}>Book</Button>
-            <Button size="small" onClick={() => {
-              setEditingRow(r);
-              setSelCompany(r.company || '');
-              setSelModel(r.model || '');
-              setSelVariant(r.variant || '');
-              editForm.setFieldsValue({
-                company: r.company || '',
-                model: r.model || '',
-                variant: r.variant || '',
-                color: r.color || '',
-                notes: '',
-              });
-              setEditModalOpen(true);
-            }}>Edit</Button>
-            {/* Delete removed per request */}
-      </Space>
+      isAdminOwner ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <Space size={4}>
+            <Button size="small" onClick={() => openMovementModal('transfer', r)} style={{ fontSize: 11, height: 20, padding: '0 8px' }}>Transfer</Button>
+            <Button size="small" type="primary" onClick={() => openBookingModal(r)} style={{ fontSize: 11, height: 20, padding: '0 8px' }}>Book</Button>
+          </Space>
+          <Space size={4}>
+            <Button size="small" onClick={() => openMovementModal('return', r)} style={{ fontSize: 11, height: 20, padding: '0 8px' }}>Return</Button>
+            <Button size="small" onClick={() => openEditModal(r)} style={{ fontSize: 11, height: 20, padding: '0 8px' }}>Edit</Button>
+          </Space>
+        </div>
+      ) : (
+        <span style={{ color: '#94a3b8' }}>—</span>
+      )
     )
   };
 
-  const columns = isAdminOwner ? [...baseColumns, actionsColumn] : baseColumns;
+  const columns = isAdminOwner ? [...baseColumns, actionsColumn] : [...baseColumns];
 
   const handleExportCsv = () => {
     if (!filtered.length) {
@@ -479,7 +596,9 @@ export default function InStockUpdate() {
         dataSource={filtered}
         columns={columns}
         loading={loading && !hasCache}
-        size={isMobile ? 'small' : 'middle'}
+        size="small"
+        className="compact-table stock-finder-table"
+        tableLayout={isMobile ? "auto" : "fixed"}
         pagination={{
           current: page,
           pageSize,
@@ -489,7 +608,6 @@ export default function InStockUpdate() {
           showTotal: (total, range) => `${range[0]}-${range[1]} of ${total}`,
         }}
         rowKey={(r) => r.chassis || r.key}
-        scroll={{ x: 'max-content' }}
       />
 
       {/* Edit Modal (Admin/Owner) */}
@@ -578,6 +696,45 @@ export default function InStockUpdate() {
             )}
           </Form.Item>
           <Form.Item name="notes" label="Notes"> <Input.TextArea rows={3} placeholder="Optional notes" /> </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Transfer/Return Modal */}
+      <Modal
+        title={movementAction === 'transfer' ? 'Transfer Vehicle' : movementAction === 'return' ? 'Return Vehicle' : 'Movement'}
+        open={movementModalOpen}
+        onCancel={closeMovementModal}
+        onOk={handleMovementSave}
+        okText="Save"
+        confirmLoading={movementSaving}
+        destroyOnClose
+      >
+        {movementRow && (
+          <div style={{ marginBottom: 12, fontSize: 12, color: '#475569' }}>
+            <div><strong>Chassis:</strong> {movementRow.chassis || '-'}</div>
+            <div><strong>Vehicle:</strong> {[movementRow.company, movementRow.model, movementRow.variant, movementRow.color].filter(Boolean).join(' ') || '-'}</div>
+            <div><strong>Branch:</strong> {movementRow.branch || '-'}</div>
+          </div>
+        )}
+        <Form form={movementForm} layout="vertical">
+          {movementAction === 'transfer' && (
+            <Form.Item name="targetBranch" label="Target Branch" rules={[{ required: true, message: 'Select target branch' }]}>
+              <Select
+                showSearch
+                optionFilterProp="children"
+                placeholder="Select branch"
+                options={branchOptions.map((b) => ({ value: b, label: b }))}
+              />
+            </Form.Item>
+          )}
+          {movementAction === 'return' && (
+            <Form.Item name="returnTo" label="Return To (Dealer/Area)" rules={[{ required: true, message: 'Enter return destination' }]}>
+              <Input placeholder="e.g., Kengaria / Dealer name" />
+            </Form.Item>
+          )}
+          <Form.Item name="notes" label="Notes">
+            <Input.TextArea rows={3} placeholder="Optional notes" />
+          </Form.Item>
         </Form>
       </Modal>
 

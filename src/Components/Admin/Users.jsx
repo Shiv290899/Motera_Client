@@ -1,6 +1,6 @@
 import React from "react";
-import { Table, Button, Space, Modal, Form, Input, Select, message, Tag, Checkbox, Row, Col } from "antd";
-import { listUsers, listUsersPublic, updateUser, deleteUser } from "../../apiCalls/adminUsers";
+import { Table, Button, Space, Modal, Form, Input, Select, message, Tag, Row, Col } from "antd";
+import { listUsers, listUsersPublic, updateUser, deleteUser, createUser } from "../../apiCalls/adminUsers";
 import { listBranchesPublic } from "../../apiCalls/branches";
 import { exportToCsv } from "../../utils/csvExport";
 
@@ -9,6 +9,7 @@ const ROLE_OPTIONS = [
   { label: "Owner", value: "owner" },
   { label: "Staff", value: "staff" },
   { label: "Mechanic", value: "mechanic" },
+  { label: "Call Boy", value: "callboy" },
   { label: "Employees", value: "employees" },
   { label: "User", value: "user" },
   { label: "Backend", value: "backend" },
@@ -109,8 +110,20 @@ export default function Users({ readOnly = false }) {
   React.useEffect(() => { fetchList(); }, [fetchList]);
   React.useEffect(() => { setPage(1); }, [q, roleFilter, statusFilter, branchFilter]);
 
+  const roleValue = Form.useWatch("role", form);
+  const needsBranch = ["staff", "mechanic", "callboy"].includes(String(roleValue || "").toLowerCase());
+  const isOwnerRole = String(roleValue || "").toLowerCase() === "owner";
+
+  const onCreate = () => {
+    setEditing(null);
+    form.resetFields();
+    form.setFieldsValue({ role: "staff", status: "active" });
+    setModalOpen(true);
+  };
+
   const onEdit = (row) => {
     setEditing(row);
+    form.resetFields();
     form.setFieldsValue({
       id: row.id,
       name: row.name,
@@ -118,11 +131,8 @@ export default function Users({ readOnly = false }) {
       phone: row.phone,
       role: row.role,
       status: row.status,
-      jobTitle: row.jobTitle,
-      employeeCode: row.employeeCode,
-      primaryBranch: row.primaryBranch?._id || row.primaryBranch || undefined,
-      branches: Array.isArray(row.branches) ? row.branches.map((b) => (typeof b === 'string' ? b : b?._id)).filter(Boolean) : undefined,
-      canSwitchBranch: !!row.canSwitchBranch,
+      branchId: row.branchId || row.primaryBranch?._id || row.primaryBranch?.id || row.primaryBranch || undefined,
+      maxBranches: row.owner?.maxBranches || undefined,
     });
     setModalOpen(true);
   };
@@ -152,30 +162,29 @@ export default function Users({ readOnly = false }) {
   const onSubmit = async () => {
     try {
       const vals = await form.validateFields();
+      const role = String(vals.role || "").toLowerCase();
+      const branchId = vals.branchId || undefined;
       const payload = {
         name: vals.name,
         email: vals.email,
         ...(vals.phone ? { phone: vals.phone } : {}),
-        role: vals.role,
+        role,
         status: vals.status,
-        ...(vals.jobTitle ? { jobTitle: vals.jobTitle } : {}),
-        ...(vals.employeeCode ? { employeeCode: vals.employeeCode } : {}),
-        ...(vals.primaryBranch ? { primaryBranch: vals.primaryBranch } : {}),
-        ...(Array.isArray(vals.branches) ? { branches: vals.branches } : {}),
-        canSwitchBranch: !!vals.canSwitchBranch,
+        ...(branchId ? { branchId } : {}),
+        ...(vals.password ? { password: vals.password } : {}),
+        ...(vals.maxBranches ? { maxBranches: Number(vals.maxBranches) } : {}),
       };
-      setSaving(true);
-      if (!editing?.id) {
-        message.error("Cannot create users here. Use registration.");
-        return;
+      if (role === "backend") {
+        delete payload.branchId;
       }
-      const res = await updateUser(editing.id, payload);
+      setSaving(true);
+      const res = editing?.id ? await updateUser(editing.id, payload) : await createUser(payload);
       if (res?._status === 401 || res?._status === 403) {
         message.warning("Please login again to continue.");
         return;
       }
       if (res?.success) {
-        message.success("User updated");
+        message.success(editing?.id ? "User updated" : "User created");
         setModalOpen(false);
         setEditing(null);
         form.resetFields();
@@ -197,12 +206,11 @@ export default function Users({ readOnly = false }) {
     { title: "Name", dataIndex: "name", key: "name", sorter: (a, b) => a.name.localeCompare(b.name) },
     { title: "Email", dataIndex: "email", key: "email", width: 220 },
     { title: "Phone", dataIndex: "phone", key: "phone", width: 140 },
-    { title: "Role", dataIndex: "role", key: "role", width: 130, render: (v) => <Tag color={v === 'admin' ? 'red' : v === 'owner' ? 'gold' : v === 'backend' ? 'purple' : v === 'mechanic' ? 'cyan' : v === 'staff' ? 'blue' : 'default'}>{v}</Tag> },
-    { title: "Primary Branch", key: "primaryBranch", width: 180, render: (_, r) => r.primaryBranch?.name || "—" },
+    { title: "Role", dataIndex: "role", key: "role", width: 130, render: (v) => <Tag color={v === 'admin' ? 'red' : v === 'owner' ? 'gold' : v === 'backend' ? 'purple' : v === 'mechanic' ? 'cyan' : v === 'callboy' ? 'magenta' : v === 'staff' ? 'blue' : 'default'}>{v}</Tag> },
+    { title: "Branch", key: "branch", width: 180, render: (_, r) => r.primaryBranch?.name || r.formDefaults?.branchName || "—" },
     { title: "Status", dataIndex: "status", key: "status", width: 130, render: (v) => (
       v === "active" ? <Tag color="green">Active</Tag> : v === "inactive" ? <Tag>Inactive</Tag> : <Tag color="orange">Suspended</Tag>
     ) },
-    { title: "Last Login", dataIndex: "lastLoginAt", key: "lastLoginAt", width: 180, render: (v) => v ? new Date(v).toLocaleString() : "—" },
     ...(!readOnly ? [{
       title: "Actions",
       key: "actions",
@@ -227,27 +235,18 @@ export default function Users({ readOnly = false }) {
       { key: 'phone', label: 'Phone' },
       { key: 'role', label: 'Role' },
       { key: 'status', label: 'Status' },
-      { key: 'jobTitle', label: 'Job Title' },
-      { key: 'employeeCode', label: 'Employee Code' },
-      { key: 'primaryBranch', label: 'Primary Branch' },
-      { key: 'branches', label: 'Additional Branches' },
-      { key: 'lastLoginAt', label: 'Last Login' },
+      { key: 'primaryBranch', label: 'Branch' },
+      { key: 'maxBranches', label: 'Max Branches' },
     ];
     const rowsForCsv = items.map((u) => {
-      const branchNames = Array.isArray(u.branches)
-        ? u.branches.map((b) => (typeof b === 'string' ? b : (b?.name || b?.branchName || ''))).filter(Boolean).join('; ')
-        : '';
       return {
         name: u.name,
         email: u.email,
         phone: u.phone,
         role: u.role,
         status: u.status,
-        jobTitle: u.jobTitle,
-        employeeCode: u.employeeCode,
-        primaryBranch: (typeof u.primaryBranch === 'string' ? u.primaryBranch : u.primaryBranch?.name) || '',
-        branches: branchNames,
-        lastLoginAt: u.lastLoginAt,
+        primaryBranch: (typeof u.primaryBranch === 'string' ? u.primaryBranch : u.primaryBranch?.name) || u.formDefaults?.branchName || '',
+        maxBranches: u.owner?.maxBranches || '',
       };
     });
     exportToCsv({ filename: 'users.csv', headers, rows: rowsForCsv });
@@ -295,6 +294,7 @@ export default function Users({ readOnly = false }) {
             options={branches.map((b) => ({ label: b.name, value: b.id }))}
             style={{ width: 220 }}
           />
+          {!readOnly && <Button type="primary" onClick={onCreate}>Add User</Button>}
           <Button onClick={handleExportCsv}>Export CSV</Button>
           <Button onClick={fetchList}>Refresh</Button>
           <Button onClick={() => { setQText(""); setQ(""); setRoleFilter(undefined); setStatusFilter(undefined); setBranchFilter(undefined); }}>Reset</Button>
@@ -346,7 +346,6 @@ export default function Users({ readOnly = false }) {
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>
-              {/* No user creation here; password changes are handled elsewhere */}
               <Form.Item name="role" label="Role" initialValue="user" rules={[{ required: true }]}>
                 <Select options={ROLE_OPTIONS} />
               </Form.Item>
@@ -358,31 +357,34 @@ export default function Users({ readOnly = false }) {
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>
-              <Form.Item name="jobTitle" label="Job Title">
-                <Input placeholder="e.g., Sales Executive" />
+              <Form.Item
+                name="password"
+                label={editing ? "Reset Password" : "Password"}
+                rules={[{ required: !editing, message: "Password is required" }]}
+              >
+                <Input.Password placeholder={editing ? "Leave blank to keep existing" : "Set a password"} />
               </Form.Item>
             </Col>
 
             <Col xs={24} sm={12}>
-              <Form.Item name="employeeCode" label="Employee Code">
-                <Input placeholder="Unique within primary branch" />
+              <Form.Item
+                name="branchId"
+                label="Branch"
+                hidden={!needsBranch}
+                rules={[{ required: needsBranch, message: "Branch is required for staff/mechanic/callboy" }]}
+              >
+                <Select allowClear options={branchOptions} placeholder="Select branch" />
               </Form.Item>
             </Col>
+
             <Col xs={24} sm={12}>
-              <Form.Item name="primaryBranch" label="Primary Branch">
-                <Select allowClear options={branchOptions} placeholder="Select primary branch" />
-              </Form.Item>
-            </Col>
-
-            <Col span={24}>
-              <Form.Item name="branches" label="Additional Branches">
-                <Select mode="multiple" allowClear options={branchOptions} placeholder="Select additional branches" />
-              </Form.Item>
-            </Col>
-
-            <Col span={24}>
-              <Form.Item name="canSwitchBranch" valuePropName="checked">
-                <Checkbox>Can switch branches</Checkbox>
+              <Form.Item
+                name="maxBranches"
+                label="Max Branches"
+                hidden={!isOwnerRole}
+                rules={isOwnerRole ? [{ required: true, message: "Max branches is required" }] : []}
+              >
+                <Input type="number" min={1} placeholder="e.g., 1" />
               </Form.Item>
             </Col>
           </Row>

@@ -6,7 +6,6 @@ import { listStocks, listCurrentStocks, createStock, updateStock, listPendingTra
 import BookingForm from "./BookingForm";
 import { listBranches, listBranchesPublic } from "../apiCalls/branches";
 import { exportToCsv } from "../utils/csvExport";
-import { uniqNoCaseSorted } from "../utils/uniqNoCase";
 
 // --- Config ---
 // Vehicle catalog CSV remains (read-only) for dropdowns
@@ -18,7 +17,7 @@ const HEADERS = {
   company: ["Company", "Company Name"],
   model: ["Model", "Model Name"],
   variant: ["Variant"],
-  color: ["Color", "Colours"],
+  color: ["Color", "Colours", "Colors", "Colour", "Available Colors"],
 };
 
 const parseCsv = (text) => {
@@ -52,6 +51,13 @@ const fetchSheetRowsCSV = async (url) => {
 };
 
 const pick = (row, keys) => String(keys.map((k) => row[k] ?? "").find((v) => v !== "") || "").trim();
+const splitColors = (value) => {
+  if (!value) return [];
+  return String(value)
+    .split(/[|,/;\n]+/)
+    .map((c) => c.trim())
+    .filter(Boolean);
+};
 
 const normalizeCatalogRow = (row = {}) => ({
   company: pick(row, HEADERS.company),
@@ -122,10 +128,10 @@ export default function StockUpdate() {
     return name || '';
   }, [currentUser]);
   const myRole = useMemo(() => String(currentUser?.role || '').toLowerCase(), [currentUser]);
+  const isStaffLike = useMemo(() => ['staff','mechanic','employees'].includes(myRole), [myRole]);
   const isPriv = useMemo(() => ['admin','owner','backend'].includes(myRole), [myRole]);
-  const lockSourceBranch = useMemo(() => ['staff','mechanic','employees'].includes(myRole), [myRole]);
-  const isAdminOwner = useMemo(() => ['admin'].includes(myRole), [myRole]);
-  const isOwner = useMemo(() => myRole === 'owner', [myRole]);
+  const lockSourceBranch = isStaffLike;
+  const isAdminOwner = isPriv;
   const pendingBranch = useMemo(() => {
     if (isPriv) {
       if (branchFilter === 'all') return 'all';
@@ -142,10 +148,9 @@ export default function StockUpdate() {
   }, [items, pendingBranch, myBranch, isPriv, normalizeKey]);
   const alertPending = pendingTransfers.length ? pendingTransfers : computedPending;
   const listBranchScope = useMemo(() => {
-    const isStaffLike = ['staff','mechanic','employees'].includes(myRole);
     if (isStaffLike) return myBranch || 'self';
     return branchFilter === 'all' ? 'all' : (branchFilter || 'all');
-  }, [myRole, myBranch, branchFilter]);
+  }, [isStaffLike, myBranch, branchFilter]);
   const cacheKey = useMemo(
     () => `StockMovements:list:${JSON.stringify({ role: myRole || '', branch: listBranchScope })}`,
     [myRole, listBranchScope]
@@ -175,7 +180,7 @@ export default function StockUpdate() {
         const res = await listBranches({ limit: 100, status: 'active' }).catch(() => null);
         const data = res?.data?.items || [];
         const list = (Array.isArray(data) && data.length ? data : (await listBranchesPublic({ status: 'active', limit: 100 })).data.items) || [];
-        const names = uniqNoCaseSorted(list.map((b) => String(b?.name || '').trim()).filter(Boolean));
+        const names = Array.from(new Set(list.map((b) => String(b?.name || '').trim()).filter(Boolean)));
         setBranchNames(names);
       } catch {
         setBranchNames([]);
@@ -200,9 +205,9 @@ export default function StockUpdate() {
     }
   }, [cacheKey]);
 
-  const companies = useMemo(() => uniqNoCaseSorted(catalog.map((r) => r.company)), [catalog]);
-  const models = useMemo(() => uniqNoCaseSorted(catalog.filter((r) => r.company === company).map((r) => r.model)), [catalog, company]);
-  const variants = useMemo(() => uniqNoCaseSorted(catalog.filter((r) => r.company === company && r.model === model).map((r) => r.variant)), [catalog, company, model]);
+  const companies = useMemo(() => [...new Set(catalog.map((r) => r.company))], [catalog]);
+  const models = useMemo(() => [...new Set(catalog.filter((r) => r.company === company).map((r) => r.model))], [catalog, company]);
+  const variants = useMemo(() => [...new Set(catalog.filter((r) => r.company === company && r.model === model).map((r) => r.variant))], [catalog, company, model]);
   // Preset color choices with hex samples for quick pick
   // Updated per requirement to use the following 19 colors
   const PRESET_COLORS = useMemo(() => ([
@@ -227,17 +232,22 @@ export default function StockUpdate() {
     { name: "Maroon", hex: "#800000" },
   ]), []);
 
-  const colors = useMemo(() => {
+  const catalogColors = useMemo(() => {
     const dyn = catalog
       .filter((r) => r.company === company && r.model === model && r.variant === variant)
-      .map((r) => r.color)
-      .filter(Boolean);
+      .flatMap((r) => splitColors(r.color));
     const map = new Map();
-    PRESET_COLORS.forEach((c) => map.set(c.name.toLowerCase(), c.name));
-    dyn.forEach((c) => map.set(String(c).toLowerCase(), c));
-    const out = Array.from(map.values());
-    return out.length ? out : PRESET_COLORS.map((c) => c.name);
-  }, [catalog, company, model, variant, PRESET_COLORS]);
+    dyn.forEach((c) => {
+      const key = String(c).toLowerCase();
+      if (!map.has(key)) map.set(key, c);
+    });
+    return Array.from(map.values());
+  }, [catalog, company, model, variant]);
+
+  const colors = useMemo(
+    () => (catalogColors.length ? catalogColors : PRESET_COLORS.map((c) => c.name)),
+    [catalogColors, PRESET_COLORS]
+  );
 
   const swatch = (name) => {
     const m = PRESET_COLORS.find((x) => x.name.toLowerCase() === String(name || '').toLowerCase());
@@ -257,20 +267,20 @@ export default function StockUpdate() {
         message.warning(resp.message === 'Token Invalid' ? 'Session expired. Please log in again to admit/reject transfers.' : resp.message);
       }
       const list = Array.isArray(resp?.data) ? resp.data : [];
-      const rows = list.map((r, idx) => ({
-        key: r.movementId || idx + 1,
-        movementId: r.movementId || '',
-        chassis: r.chassisNo || '',
-        company: r.company || '',
-        model: r.model || '',
-        variant: r.variant || '',
-        color: r.color || '',
-        sourceBranch: r.sourceBranch || '',
-        targetBranch: r.targetBranch || '',
-        notes: r.notes || '',
-        createdByName: r.createdByName || '',
-        ts: r.timestamp || r.createdAt || '',
-      }));
+        const rows = list.map((r, idx) => ({
+          key: r.movementId || idx + 1,
+          movementId: r.movementId || '',
+          chassis: r.chassisNo || '',
+          company: r.company || '',
+          model: r.model || '',
+          variant: r.variant || '',
+          color: r.color || '',
+          sourceBranch: r.sourceBranch || '',
+          targetBranch: r.targetBranch || '',
+          notes: r.notes || '',
+          createdByName: r.createdByName || '',
+          ts: pickTs(r),
+        }));
       setPendingTransfers(rows);
     } catch {
       setPendingTransfers([]);
@@ -350,14 +360,20 @@ export default function StockUpdate() {
   const label = (s) => <strong style={{ fontWeight: 700 }}>{s}</strong>;
   const isEdit = Boolean(editingMovementId);
   const isVehicleLocked = action !== 'add' && !isEdit; // allow editing vehicle fields while editing
-  const isChassisLocked = action !== 'add';
+  const isChassisLocked = action !== 'add' || isEdit;
   const isSourceLocked = lockSourceBranch || action !== 'add';
+
+  useEffect(() => {
+    if (isVehicleLocked) return;
+    if (catalogColors.length !== 1) return;
+    const current = form.getFieldValue('color');
+    if (!current) form.setFieldsValue({ color: catalogColors[0] });
+  }, [catalogColors, form, isVehicleLocked]);
 
   const fetchList = async () => {
     setLoadingList(true);
     try {
       // For staff-like roles, show current inventory only (latest per chassis)
-      const isStaffLike = ['staff','mechanic','employees'].includes(myRole)
       const branchParam = isStaffLike ? myBranch : (branchFilter === 'all' ? undefined : branchFilter);
       const resp = isStaffLike
         ? await listCurrentStocks({ branch: branchParam })
@@ -375,7 +391,7 @@ export default function StockUpdate() {
           }
           return {
             key: idx + 1,
-            ts: r.timestamp || r.createdAt || '',
+            ts: pickTs(r),
             chassis: r.chassisNo || '',
             company: r.company || '',
             model: r.model || '',
@@ -455,50 +471,7 @@ export default function StockUpdate() {
     }
   }, [modalOpen, lockSourceBranch, myBranch, form]);
 
-  const openWithAction = (base, act) => {
-    try {
-      if (act === 'invoice') {
-        // Open Booking form modal with prefilled vehicle stock details
-        const prefill = {
-          company: base?.company || '',
-          bikeModel: base?.model || '',
-          variant: base?.variant || '',
-          color: base?.color || '',
-          chassisNo: base?.chassis || base?.chassisNo || '',
-          purchaseType: 'cash',
-          addressProofMode: 'aadhaar',
-          executive: (currentUser?.name || currentUser?.email || ''),
-          branch: (currentUser?.formDefaults?.branchName || currentUser?.primaryBranch?.name || myBranch || ''),
-        };
-        setInvoicePrefill(prefill);
-        setInvoiceBaseRow(base || null);
-        setInvoiceModalOpen(true);
-        return;
-      }
-
-      setAllowedActions([act]);
-      setAction(act);
-      setFormError("");
-      const patch = {
-        chassis: base?.chassis || base?.chassisNo || undefined,
-        company: base?.company || undefined,
-        model: base?.model || undefined,
-        variant: base?.variant || undefined,
-        color: base?.color || undefined,
-        // Prefer the row's current source (server-provided) for accurate chaining
-        sourceBranch: base?.sourceBranch || myBranch || undefined,
-        // For transfer, suggest previous source as the target (quick reverse)
-        targetBranch: act === 'transfer' ? (base?.lastSourceBranch || base?.sourceBranch || undefined) : undefined,
-        returnTo: undefined,
-        customerName: undefined,
-        notes: undefined,
-      };
-      form.setFieldsValue(patch);
-      setModalOpen(true);
-    } catch {
-      // ignore
-    }
-  };
+  
 
   const onEditRow = (base) => {
     try {
@@ -529,67 +502,166 @@ export default function StockUpdate() {
     }
   };
 
+  const openQuickMovement = (nextAction, base) => {
+    if (!base || !nextAction) return;
+    try {
+      setEditingMovementId(null);
+      setAllowedActions([nextAction]);
+      setFormError("");
+      setAction(nextAction);
+      setCompany(base?.company || '');
+      setModel(base?.model || '');
+      setVariant(base?.variant || '');
+      form.resetFields();
+      const patch = {
+        chassis: base?.chassis || base?.chassisNo || undefined,
+        company: base?.company || undefined,
+        model: base?.model || undefined,
+        variant: base?.variant || undefined,
+        color: base?.color || undefined,
+        sourceBranch: base?.sourceBranch || base?.lastSourceBranch || myBranch || undefined,
+        targetBranch: undefined,
+        returnTo: undefined,
+        customerName: undefined,
+        notes: undefined,
+      };
+      form.setFieldsValue(patch);
+      setModalOpen(true);
+    } catch {
+      // ignore open failures
+    }
+  };
+
+  const openBookingModal = (base) => {
+    if (!base) return;
+    const pre = {
+      company: base.company || '',
+      bikeModel: base.model || '',
+      variant: base.variant || '',
+      color: base.color || '',
+      chassisNo: base.chassis || '',
+      purchaseType: 'cash',
+      addressProofMode: 'aadhaar',
+      executive: (currentUser?.name || currentUser?.email || ''),
+      branch: base.sourceBranch || base.lastSourceBranch || myBranch || '',
+    };
+    setInvoicePrefill(pre);
+    setInvoiceBaseRow(base);
+    setInvoiceModalOpen(true);
+  };
  
 
-  // Core columns (excluding Source so we can place it differently per role)
+  const stackStyle = { display: 'flex', flexDirection: 'column', gap: 2, lineHeight: 1.2 };
+  const lineStyle = {
+    whiteSpace: isMobile ? 'normal' : 'nowrap',
+    overflow: 'hidden',
+    textOverflow: isMobile ? 'clip' : 'ellipsis',
+    wordBreak: isMobile ? 'break-word' : 'normal',
+  };
+  const chassisLineStyle = { whiteSpace: 'normal', overflow: 'visible', textOverflow: 'clip', wordBreak: 'break-all' };
+  const pickTs = (r) => (
+    r?.timestamp ||
+    r?.createdAt ||
+    r?.updatedAt ||
+    r?.updated_at ||
+    r?.lastUpdated ||
+    r?.lastMovementAt ||
+    r?.time ||
+    r?.date ||
+    r?.Timestamp ||
+    r?.Time ||
+    r?.Date ||
+    r?.ts ||
+    ''
+  );
+  const formatTs = (raw) => {
+    if (!raw) return '—';
+    const num = Number(raw);
+    if (!Number.isNaN(num)) {
+      const dNum = dayjs(num);
+      if (dNum.isValid()) return dNum.format('DD-MM-YYYY HH:mm');
+    }
+    const d = dayjs(raw);
+    return d.isValid() ? d.format('DD-MM-YYYY HH:mm') : String(raw);
+  };
+  const actionTag = (v, row) => {
+    const t = String(v || "").toLowerCase();
+    const status = String(row?.transferStatus || '').toLowerCase();
+    let color = t === 'transfer' ? 'geekblue' : t === 'return' ? 'volcano' : t === 'invoice' ? 'green' : t === 'add' ? 'purple' : 'default';
+    let display = t === 'invoice' ? 'Book' : (v || '-');
+    if (t === 'transfer') {
+      if (status === 'pending') { color = 'orange'; display = 'Transfer (Pending)'; }
+      else if (status === 'rejected') { color = 'red'; display = 'Transfer (Rejected)'; }
+      else if (status === 'admitted') { color = 'green'; display = 'Transfer (Admitted)'; }
+    }
+    return <Tag color={color} style={{ fontSize: 11, lineHeight: 1.1 }}>{display}</Tag>;
+  };
+
+  // Core columns
   const baseColsCore = [
-    { title: "Timestamp", dataIndex: "ts", key: "ts", width: 20, ellipsis: true, render: (v) => {
-      if (!v) return '—';
-      const d = dayjs(v);
-      return d.isValid() ? d.format('YYYY-MM-DD HH:mm:ss') : String(v);
-    } },
-    { title: "Chassis", dataIndex: "chassis", key: "chassis", width: 20, ellipsis: false, render: (v)=> (
-      <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{v || '-'}</span>
+    { title: "Time / Source", key: "timeSource", width: isMobile ? 70 : 90, render: (_, r) => (
+      <div style={stackStyle}>
+        <div style={lineStyle}>{formatTs(pickTs(r))}</div>
+        <div style={lineStyle}><span style={{ color: '#6b7280' }}>{r.sourceBranch || '—'}</span></div>
+      </div>
     ) },
-    { title: "Company", dataIndex: "company", key: "company", width: 20, ellipsis: false },
-    { title: "Model", dataIndex: "model", key: "model", width: 20, ellipsis: false },
-    { title: "Variant", dataIndex: "variant", key: "variant", width: 20, ellipsis: false },
-    { title: "Color", dataIndex: "color", key: "color", width: 10, ellipsis: false },
-    { title: "Action", dataIndex: "action", key: "action", width: 20, render: (v, row) => {
-      const t = String(v || "").toLowerCase();
-      const status = String(row?.transferStatus || '').toLowerCase();
-      let color = t === 'transfer' ? 'geekblue' : t === 'return' ? 'volcano' : t === 'invoice' ? 'green' : t === 'add' ? 'purple' : 'default';
-      let display = t === 'invoice' ? 'Book' : (v || '-');
-      if (t === 'transfer') {
-        if (status === 'pending') { color = 'orange'; display = 'Transfer (Pending)'; }
-        else if (status === 'rejected') { color = 'red'; display = 'Transfer (Rejected)'; }
-        else if (status === 'admitted') { color = 'green'; display = 'Transfer (Admitted)'; }
-      }
-      return <Tag color={color}>{display}</Tag>;
-    } },
+    { title: "Chassis / Company || Model", key: "chassisCompanyModel", width: isMobile ? 90 : 100, render: (_, r) => (
+      <div style={stackStyle}>
+        <div style={chassisLineStyle}>
+          <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{r.chassis || '-'}</span>
+        </div>
+        <div style={lineStyle}>{`${r.company || '—'} || ${r.model || '—'}`}</div>
+      </div>
+    ) },
+    { title: "Variant + Color || Action", key: "variantColorAction", width: isMobile ? 110 : 130, render: (_, r) => (
+      <div style={stackStyle}>
+        <div style={lineStyle}>{r.variant || '—'}</div>
+        <div style={lineStyle}>
+          <Space size={6}>
+            <span>{`${r.color || '—'} ||`}</span>
+            {actionTag(r.action, r)}
+          </Space>
+        </div>
+      </div>
+    ) },
   ];
-  const sourceCol = { title: "Source", dataIndex: "sourceBranch", key: "sourceBranch", width: 20, ellipsis: false };
-  // Staff: hide Timestamp column
-  const baseColsCoreStaff = baseColsCore.filter((c) => c.dataIndex !== 'ts');
   const adminExtras = [
-    { title: "Target/Return/Customer", key: "dest", ellipsis: true, render: (_, r) => r.targetBranch || r.returnTo || r.customerName || "—" },
-    { title: "Notes", dataIndex: "notes", key: "notes", ellipsis: true },
+    { title: "Target/Return/Customer + Notes", key: "destNotes", width: isMobile ? 160 : 250, render: (_, r) => (
+      <div style={stackStyle}>
+        <div style={lineStyle}>{r.targetBranch || r.returnTo || r.customerName || "—"}</div>
+        <div style={lineStyle}>{r.notes || "—"}</div>
+      </div>
+    ) },
   ];
   const actionsCol = {
     title: "Actions",
     key: "actions",
-    width: isAdminOwner ? 50 : 10,
+    width: isMobile ? 20 : 40,
     render: (_, r) => (
-      <Space size="small">
-        {!isOwner && (
-          <>
-            <Button size="small" onClick={() => openWithAction(r, 'transfer')}>Transfer</Button>
-            <Button size="small" onClick={() => openWithAction(r, 'return')}>Return</Button>
-          </>
-        )}
-        <Button size="small" type="primary" onClick={() => openWithAction(r, 'invoice')}>Book</Button>
-        {isAdminOwner && (
-          <Button size="small" onClick={() => onEditRow(r)}>Edit</Button>
-        )}
-      </Space>
+      isAdminOwner ? (
+        <Space size={4} wrap={false} style={{ whiteSpace: 'nowrap' }}>
+          <Button size="small" onClick={() => onEditRow(r)} style={{ fontSize: 10, height: 18, padding: '0 6px' }}>Edit</Button>
+        </Space>
+      ) : isStaffLike ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <Space size={4}>
+            <Button size="small" onClick={() => openQuickMovement('transfer', r)} style={{ fontSize: 10, height: 18, padding: '0 6px' }}>Transfer</Button>
+            <Button size="small" type="primary" onClick={() => openBookingModal(r)} style={{ fontSize: 10, height: 18, padding: '0 6px' }}>Book</Button>
+          </Space>
+          <Space size={4}>
+            <Button size="small" onClick={() => openQuickMovement('return', r)} style={{ fontSize: 10, height: 18, padding: '0 6px' }}>Return</Button>
+          </Space>
+        </div>
+      ) : (
+        <span style={{ color: '#94a3b8' }}>—</span>
+      )
     )
   };
-  const isStaffLike = ['staff','mechanic','employees'].includes(myRole);
-  // Staff order: Chassis, Company, Model, Variant, Color, Action, Actions, Source (timestamp hidden)
-  // Admin/Owner order: Timestamp, Chassis, Company, Model, Variant, Color, Action, Actions, Source, Target/Return/Customer, Notes
+  // Staff order: Time/Source, Chassis/Company/Model, Variant/Color/Action, Actions
+  // Admin/Owner order: Time/Source, Chassis/Company/Model, Variant/Color/Action, Actions, Target/Return/Customer+Notes
   const columns = isStaffLike
-    ? [...baseColsCoreStaff, actionsCol, sourceCol]
-    : [...baseColsCore, actionsCol, sourceCol, ...adminExtras];
+    ? [...baseColsCore, actionsCol]
+    : [...baseColsCore, actionsCol, ...adminExtras];
 
   // Client-side filtering (for admin/owner). Staff view already scoped to branch.
   const filteredItems = useMemo(() => {
@@ -745,7 +817,7 @@ export default function StockUpdate() {
                     <span style={{ fontWeight: 700 }}>Chassis:</span>
                     <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{p.chassis || '-'}</span>
                     <Tag color="geekblue" style={{ marginLeft: 4 }}>
-                      {[p.company, p.model, p.variant].filter(Boolean).join(' ')}
+                      {[p.company, p.model, p.variant, p.color].filter(Boolean).join(' ')}
                     </Tag>
                   </div>
                   <div style={{ marginTop: 6, display: 'flex', gap: 12, flexWrap: 'wrap', color: '#111827' }}>
@@ -754,7 +826,7 @@ export default function StockUpdate() {
                     <span style={{ fontWeight: 600 }}>{p.targetBranch || 'Target ?'}</span>
                   </div>
                   <div style={{ marginTop: 4, fontSize: 12, color: '#4b5563' }}>
-                    Requested by {p.createdByName || 'user'}{p.ts ? ` on ${dayjs(p.ts).format('DD MMM, HH:mm')}` : ''}
+                    Requested by {p.createdByName || 'user'}{p.ts ? ` on ${dayjs(p.ts).format('DD-MM-YYYY HH:mm')}` : ''}
                   </div>
                   {p.notes && <div style={{ marginTop: 4, fontSize: 12, color: '#92400e' }}>Notes: {p.notes}</div>}
                 </div>
@@ -801,8 +873,10 @@ export default function StockUpdate() {
           onChange: (p, ps) => { setPage(p); if (ps !== pageSize) setPageSize(ps); },
           showTotal: (total, range) => `${range[0]}-${range[1]} of ${total}`,
         }}
-        size={isMobile ? "small" : "middle"}
-        scroll={{ x: 'max-content' }}
+        size="small"
+        className="stock-movements-table"
+        tableLayout={isMobile ? "auto" : "fixed"}
+        scroll={isMobile ? { x: "max-content", y: 420 } : { y: 600 }}
         rowKey={(r) => `${r.ts}-${r.chassis}-${r.key}`}
       />
 
@@ -879,27 +953,32 @@ export default function StockUpdate() {
               </Form.Item>
               {!isVehicleLocked && (
                 <Space wrap size="small" style={{ marginTop: -8, marginBottom: 8 }}>
-                  {PRESET_COLORS.map((c) => (
-                    <Tooltip title={c.name} key={c.name}>
-                      <Button
-                        size="small"
-                        onClick={() => form.setFieldsValue({ color: c.name })}
-                        style={{
-                          height: 28,
-                          borderRadius: 14,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 8,
-                          padding: '0 10px',
-                          border: `1px solid ${c.border || '#d1d5db'}`,
-                          background: '#fff'
-                        }}
-                      >
-                        <span style={{ width: 14, height: 14, borderRadius: 7, background: c.hex, border: `1px solid ${c.border || '#d1d5db'}` }} />
-                        <span>{c.name}</span>
-                      </Button>
-                    </Tooltip>
-                  ))}
+                  {colors.filter(Boolean).map((c) => {
+                    const name = String(c || '').trim();
+                    if (!name) return null;
+                    const s = swatch(name);
+                    return (
+                      <Tooltip title={name} key={name}>
+                        <Button
+                          size="small"
+                          onClick={() => form.setFieldsValue({ color: name })}
+                          style={{
+                            height: 28,
+                            borderRadius: 14,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            padding: '0 10px',
+                            border: `1px solid ${s.border || '#d1d5db'}`,
+                            background: '#fff'
+                          }}
+                        >
+                          <span style={{ width: 14, height: 14, borderRadius: 7, background: s.bg, border: `1px solid ${s.border || '#d1d5db'}` }} />
+                          <span>{name}</span>
+                        </Button>
+                      </Tooltip>
+                    );
+                  })}
                 </Space>
               )}
             </Col>
@@ -954,6 +1033,7 @@ export default function StockUpdate() {
                 <Form.Item label={label("Action")}>
                   <Radio.Group
                     value={action}
+                    disabled={isEdit}
                     onChange={(e) => setAction(e.target.value)}
                   >
                     {(allowedActions || ["add","transfer","return","invoice"]).includes("add") && (

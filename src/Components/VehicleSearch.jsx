@@ -25,9 +25,9 @@ import { exportToCsv } from "../utils/csvExport";
 const { Text } = Typography;
 
 const DEFAULT_BOOKING_GAS_URL =
-  "https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=booking";
+  "https://script.google.com/macros/s/AKfycbwd-hKTwEfAretqEn7c_jIqNgheFgDaSVjCO3wHHQxgXQbbd8grLr8tUaRyLoAJWe4O/exec?module=booking";
 const DEFAULT_JOBCARD_GAS_URL =
-  "https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=jobcard";
+  "https://script.google.com/macros/s/AKfycbwd-hKTwEfAretqEn7c_jIqNgheFgDaSVjCO3wHHQxgXQbbd8grLr8tUaRyLoAJWe4O/exec?module=jobcard";
 const GAS_SECRET = import.meta.env.VITE_JOBCARD_GAS_SECRET || "";
 const BOOKING_SECRET = import.meta.env.VITE_BOOKING_GAS_SECRET || "";
 
@@ -498,7 +498,7 @@ export default function VehicleSearch() {
         {
           label: "Created",
           value: mainBooking.createdAt
-            ? mainBooking.createdAt.format("DD MMM YYYY")
+            ? mainBooking.createdAt.format("DD-MM-YYYY HH:mm")
             : "-",
         },
       ]
@@ -592,7 +592,7 @@ export default function VehicleSearch() {
   const handleExportCsv = () => {
     const fmt = (v) => {
       const d = dayjs(v);
-      return d.isValid() ? d.format("YYYY-MM-DD HH:mm") : "";
+      return d.isValid() ? d.format("DD-MM-YYYY HH:mm") : "";
     };
     const rowsForCsv = [];
     bookings.forEach((b, idx) => {
@@ -898,7 +898,7 @@ export default function VehicleSearch() {
                     >
                       <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-start" }}>
                         <Tag color="gold" style={{ fontWeight: 600 }}>
-                          {s.createdAt ? s.createdAt.format("DD MMM YYYY") : "-"}
+                          {s.createdAt ? s.createdAt.format("DD-MM-YYYY HH:mm") : "-"}
                         </Tag>
                         <Space wrap size={[8, 8]}>
                           <Tag color="geekblue">{ordinal(s.serviceNo || idx + 1)} Service</Tag>

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { Table, Grid, Space, Button, Select, Input, Tag, Typography, message, DatePicker, Modal, Tooltip } from "antd";
 import useDebouncedValue from "../hooks/useDebouncedValue";
 // Sheet-only remarks; no backend remarks API
@@ -6,10 +6,12 @@ import dayjs from "dayjs";
 import { saveJobcardViaWebhook } from "../apiCalls/forms";
 import { useNavigate } from "react-router-dom";
 import { exportToCsv } from "../utils/csvExport";
-import { uniqNoCaseSorted } from "../utils/uniqNoCase";
+import { normalizeKey, uniqCaseInsensitive, toKeySet } from "../utils/caseInsensitive";
+import { handleSmartPrint } from "../utils/printUtils";
+import PostServiceSheet from "./PostServiceSheet";
 
 // GAS endpoints (module-level) so both list + remark share same URL/secret
-const DEFAULT_JC_URL = "https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=jobcard";
+const DEFAULT_JC_URL = "https://script.google.com/macros/s/AKfycbwd-hKTwEfAretqEn7c_jIqNgheFgDaSVjCO3wHHQxgXQbbd8grLr8tUaRyLoAJWe4O/exec?module=jobcard";
 const GAS_URL = import.meta.env.VITE_JOBCARD_GAS_URL || DEFAULT_JC_URL;
 const GAS_SECRET = import.meta.env.VITE_JOBCARD_GAS_SECRET || '';
 
@@ -43,6 +45,7 @@ export default function Jobcards() {
   const [loading, setLoading] = useState(false);
   const [branchFilter, setBranchFilter] = useState("all");
   const [serviceFilter, setServiceFilter] = useState("all"); // free | paid | all
+  const [statusFilter, setStatusFilter] = useState("all"); // pending | completed | all
   const [q, setQ] = useState("");
   const debouncedQ = useDebouncedValue(q, 300);
   const [dateRange, setDateRange] = useState(null); // [dayjs, dayjs]
@@ -63,6 +66,10 @@ export default function Jobcards() {
   const [remarkSaving, setRemarkSaving] = useState(false);
   const [hasCache, setHasCache] = useState(false);
   const [filterSourceRows, setFilterSourceRows] = useState([]);
+  const invoiceRef = useRef(null);
+  const [invoiceOpen, setInvoiceOpen] = useState(false);
+  const [invoiceData, setInvoiceData] = useState(null);
+  const [invoiceLoadingId, setInvoiceLoadingId] = useState(null);
 
   useEffect(() => {
     try {
@@ -76,7 +83,7 @@ export default function Jobcards() {
       if (Array.isArray(u?.branches)) {
         u.branches.forEach((b)=>{ const nm = typeof b === 'string' ? b : (b?.name || ''); if (nm) list.push(nm); });
       }
-      setAllowedBranches(uniqNoCaseSorted(list.filter(Boolean)));
+      setAllowedBranches(Array.from(new Set(list.filter(Boolean))));
     } catch { /* ignore */ }
   }, []);
 
@@ -91,7 +98,7 @@ export default function Jobcards() {
   const cacheKey = (() => {
     const start = dateRange && dateRange[0] ? dateRange[0].startOf('day').valueOf() : '';
     const end = dateRange && dateRange[1] ? dateRange[1].endOf('day').valueOf() : '';
-    return `Jobcards:list:${JSON.stringify({ branchFilter, serviceFilter, q: debouncedQ||'', start, end, page, pageSize, USE_SERVER_PAG })}`;
+    return `Jobcards:list:${JSON.stringify({ branchFilter, serviceFilter, statusFilter, q: debouncedQ||'', start, end, page, pageSize, USE_SERVER_PAG })}`;
   })();
 
   // Row normalizer (used for main list and filter source fetch)
@@ -154,6 +161,136 @@ export default function Jobcards() {
     };
   }, []);
 
+  const parsePayloadFromRow = (row) => {
+    if (!row) return null;
+    if (row.payload && typeof row.payload === 'object') return row.payload;
+    const raw =
+      row.payload ||
+      row.Payload ||
+      row.PAYLOAD ||
+      row?.values?.Payload ||
+      row?.values?.payload ||
+      row?.values?.PAYLOAD ||
+      row?._raw?.payload ||
+      row?._raw?.Payload ||
+      row?._raw?.PAYLOAD ||
+      row?._raw?.values?.Payload ||
+      row?._raw?.values?.payload ||
+      row?._raw?.values?.PAYLOAD ||
+      '';
+    if (raw && typeof raw === 'object') return raw;
+    if (raw && typeof raw === 'string') {
+      try { return JSON.parse(raw); } catch { return null; }
+    }
+    if (row.formValues || row.values) return row;
+    return null;
+  };
+
+  const buildInvoicePayload = (payload, row) => {
+    if (!payload) return null;
+    const fv = payload.formValues || payload.values || {};
+    const labourRows = Array.isArray(payload.labourRows)
+      ? payload.labourRows
+      : Array.isArray(fv.labourRows)
+      ? fv.labourRows
+      : [];
+    const totalsIn = payload.totals || fv.totals || {};
+    const computedSub = labourRows.reduce(
+      (sum, r) => sum + Number(r?.qty || 0) * Number(r?.rate || 0),
+      0
+    );
+    const totals = {
+      labourSub: totalsIn.labourSub ?? computedSub,
+      labourGST: totalsIn.labourGST ?? 0,
+      labourDisc: totalsIn.labourDisc ?? 0,
+      grand: totalsIn.grand ?? computedSub,
+    };
+    const createdAt =
+      payload.postServiceAt ||
+      payload.createdAt ||
+      payload.savedAt ||
+      row?.postAt ||
+      row?.ts ||
+      new Date();
+    return {
+      vals: {
+        jcNo: row?.jcNo || fv.jcNo || "",
+        regNo: row?.regNo || fv.regNo || "",
+        custName: row?.name || fv.custName || fv.name || "",
+        custMobile: row?.mobile || fv.custMobile || fv.mobile || "",
+        km: fv.km || "",
+        model: row?.model || fv.model || "",
+        colour: fv.colour || row?.colour || "",
+        branch: row?.branch || fv.branch || "",
+        executive: row?.executive || fv.executive || "",
+        createdAt,
+        labourRows,
+        gstLabour: totalsIn.gstLabour || totalsIn.labourGST || 0,
+      },
+      totals,
+    };
+  };
+
+  const handleServiceInvoice = async (row) => {
+    if (!row) return;
+    const status = String(row.status || "").toLowerCase();
+    if (status !== 'completed') {
+      message.warning("Complete post-service to generate the service invoice.");
+      return;
+    }
+    const key = row.jcNo || row.key || row.mobile || '';
+    setInvoiceLoadingId(key);
+    try {
+      let payload = parsePayloadFromRow(row);
+      let built = payload ? buildInvoicePayload(payload, row) : null;
+      const hasItems = Array.isArray(built?.vals?.labourRows) && built.vals.labourRows.length > 0;
+      if (!built || !hasItems) {
+        const mobile = String(row.mobile || "").replace(/\D/g, "").slice(-10);
+        if (mobile.length === 10) {
+          const base = { action: 'search', mode: 'mobile', query: mobile };
+          const payloadReq = GAS_SECRET ? { ...base, secret: GAS_SECRET } : base;
+          const resp = await saveJobcardViaWebhook({ webhookUrl: GAS_URL, method: 'GET', payload: payloadReq });
+          const js = resp?.data || resp;
+          const rows = Array.isArray(js?.rows) ? js.rows : (Array.isArray(js?.data) ? js.data : []);
+          if (rows.length) {
+            let target = rows[0];
+            if (row.jcNo) {
+              const match = rows.find((r) => {
+                const p = parsePayloadFromRow(r);
+                const fv = p?.formValues || p?.values || {};
+                const id =
+                  fv.jcNo ||
+                  r?.jcNo ||
+                  r?.values?.['JC No'] ||
+                  r?.values?.['JC No.'] ||
+                  r?.values?.['Job Card No'] ||
+                  '';
+                return String(id || '').trim() === String(row.jcNo || '').trim();
+              });
+              if (match) target = match;
+            }
+            const fetchedPayload = parsePayloadFromRow(target);
+            built = fetchedPayload ? buildInvoicePayload(fetchedPayload, row) : built;
+          }
+        }
+      }
+      if (!built) {
+        message.error("Could not load service invoice data.");
+        return;
+      }
+      setInvoiceData(built);
+      setInvoiceOpen(true);
+      setTimeout(() => {
+        try { handleSmartPrint(invoiceRef.current); } catch { /* ignore */ }
+        setTimeout(() => setInvoiceOpen(false), 500);
+      }, 50);
+    } catch {
+      message.error("Could not generate service invoice.");
+    } finally {
+      setInvoiceLoadingId(null);
+    }
+  };
+
   // Seed from cache for instant paint
   useEffect(() => {
     try {
@@ -185,6 +322,7 @@ export default function Jobcards() {
           q: debouncedQ || '',
           branch: branchFilter !== 'all' ? branchFilter : '',
           service: serviceFilter !== 'all' ? serviceFilter : '',
+          status: statusFilter !== 'all' ? statusFilter : '',
         };
         if (dateRange && dateRange[0] && dateRange[1]) {
           filters.start = dateRange[0].startOf('day').valueOf();
@@ -230,48 +368,32 @@ export default function Jobcards() {
     const handler = () => load();
     window.addEventListener('reload-jobcards', handler);
     return () => { cancelled = true; window.removeEventListener('reload-jobcards', handler); };
-  }, [branchFilter, serviceFilter, debouncedQ, dateRange, page, pageSize, USE_SERVER_PAG]);
+  }, [branchFilter, serviceFilter, statusFilter, debouncedQ, dateRange, page, pageSize, USE_SERVER_PAG]);
 
   const optionRows = filterSourceRows.length ? filterSourceRows : rows;
 
   const branches = useMemo(() => {
-    const norm = (s) => String(s || '').trim();
-    const set = new Map();
-    optionRows.forEach((r) => {
-      const raw = norm(r.branch);
-      if (!raw) return;
-      const low = raw.toLowerCase();
-      if (!set.has(low)) set.set(low, raw);
-    });
-    const opts = Array.from(set.values());
+    const opts = uniqCaseInsensitive(optionRows.map((r) => r.branch));
     const isPriv = ["owner","admin"].includes(userRole);
     if (!isPriv && allowedBranches.length) {
-      const allowedLc = new Set(allowedBranches.map((b)=>String(b||'').toLowerCase()));
-      return ["all", ...opts.filter((b)=> allowedLc.has(String(b||'').toLowerCase()))];
+      const allowedLc = toKeySet(allowedBranches);
+      return ["all", ...opts.filter((b)=> allowedLc.has(normalizeKey(b)))];
     }
     return ["all", ...opts];
   }, [optionRows, userRole, allowedBranches]);
   const services = useMemo(() => {
-    const norm = (s) => String(s || '').trim();
-    const set = new Map();
-    optionRows.forEach((r) => {
-      const raw = norm(r.serviceType);
-      if (!raw) return;
-      const low = raw.toLowerCase();
-      if (!set.has(low)) set.set(low, raw);
-    });
-    return ["all", ...Array.from(set.values())];
+    return ["all", ...uniqCaseInsensitive(optionRows.map((r) => r.serviceType))];
   }, [optionRows]);
 
   const applyFilters = useCallback((list) => {
-    const allowedSet = new Set((allowedBranches || []).map((b)=>String(b||'').toLowerCase()));
-    const norm = (s) => String(s || '').toLowerCase().trim();
+    const allowedSet = toKeySet(allowedBranches);
     const scoped = (list || []).filter((r)=>{
       if (allowedSet.size && !["owner","admin","backend"].includes(userRole)) {
-        if (!allowedSet.has(norm(r.branch))) return false;
+        if (!allowedSet.has(normalizeKey(r.branch))) return false;
       }
-      if (branchFilter !== "all" && norm(r.branch) !== norm(branchFilter)) return false;
-      if (serviceFilter !== "all" && norm(r.serviceType) !== norm(serviceFilter)) return false;
+      if (branchFilter !== "all" && normalizeKey(r.branch) !== normalizeKey(branchFilter)) return false;
+      if (serviceFilter !== "all" && normalizeKey(r.serviceType) !== normalizeKey(serviceFilter)) return false;
+      if (statusFilter !== "all" && normalizeKey(r.status) !== normalizeKey(statusFilter)) return false;
       if (dateRange && dateRange[0] && dateRange[1]) {
         const start = dateRange[0].startOf('day').valueOf();
         const end = dateRange[1].endOf('day').valueOf();
@@ -287,7 +409,7 @@ export default function Jobcards() {
       return true;
     });
     return scoped.slice().sort((a,b)=> (b.tsMs||0) - (a.tsMs||0));
-  }, [allowedBranches, branchFilter, dateRange, debouncedQ, serviceFilter, userRole]);
+  }, [allowedBranches, branchFilter, dateRange, debouncedQ, serviceFilter, statusFilter, userRole]);
 
   const filtered = useMemo(() => applyFilters(rows), [applyFilters, rows]);
 
@@ -295,7 +417,7 @@ export default function Jobcards() {
   useEffect(() => {
     setPage(1);
     setLoadedCount(pageSize);
-  }, [branchFilter, serviceFilter, debouncedQ, dateRange]);
+  }, [branchFilter, serviceFilter, statusFilter, debouncedQ, dateRange]);
   useEffect(() => { setLoadedCount(pageSize); }, [pageSize]);
 
   const loadExportRows = useCallback(async () => {
@@ -306,6 +428,7 @@ export default function Jobcards() {
       q: debouncedQ || '',
       branch: branchFilter !== 'all' ? branchFilter : '',
       service: serviceFilter !== 'all' ? serviceFilter : '',
+      status: statusFilter !== 'all' ? statusFilter : '',
     };
     if (dateRange && dateRange[0] && dateRange[1]) {
       filters.start = dateRange[0].startOf('day').valueOf();
@@ -316,7 +439,7 @@ export default function Jobcards() {
     const js = resp?.data || resp;
     const dataArr = Array.isArray(js?.data) ? js.data : (Array.isArray(js?.rows) ? js.rows : []);
     return dataArr.map((o, idx) => mapJobRow(o, idx)).filter((r)=>r.jcNo || r.name || r.mobile);
-  }, [USE_SERVER_PAG, GAS_URL, GAS_SECRET, branchFilter, dateRange, debouncedQ, mapJobRow, rows, serviceFilter]);
+  }, [USE_SERVER_PAG, GAS_URL, GAS_SECRET, branchFilter, dateRange, debouncedQ, mapJobRow, rows, serviceFilter, statusFilter]);
 
   const handleExportCsv = async () => {
     const msgKey = 'export-jobcards';
@@ -390,58 +513,96 @@ export default function Jobcards() {
     return () => { cancelled = true; };
   }, []);
 
+  const stackStyle = { display: 'flex', flexDirection: 'column', gap: 2, lineHeight: 1.2 };
+  const lineStyle = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+  const statusColor = (v) => {
+    const s = String(v || '').toLowerCase();
+    if (s === 'completed') return 'green';
+    if (s === 'pending') return 'orange';
+    return 'default';
+  };
+  const statusLabel = (v) => {
+    const s = String(v || '').toLowerCase();
+    if (s === 'completed') return 'Completed';
+    if (s === 'pending') return 'Pending';
+    return String(v || '—') || '—';
+  };
+  const stampRemark = (note) => {
+    const ts = dayjs().format('DD-MM-YYYY HH:mm');
+    const text = String(note || '').trim();
+    return text ? `${ts} - ${text}` : ts;
+  };
+
   const columns = [
-    { title: "Time", dataIndex: "ts", key: "ts", width: 20, ellipsis: true, render: (v)=> formatTs(v) },
-    { title: "Branch", dataIndex: "branch", key: "branch", width: 50 },
-    { title: "Customer Name", dataIndex: "name", key: "name", width: 50, ellipsis: true },
-    { title: "Mobile", dataIndex: "mobile", key: "mobile", width: 50 },
-    { title: "Model", dataIndex: "model", key: "model", width: 20 },
-    { title: "Service Type", dataIndex: "serviceType", key: "serviceType", width: 20, align: 'center', render: (v)=> String(v||'') },
-    { title: "Service Amount", dataIndex: "amount", key: "amount", width: 20, align: 'right' },
-    { title: "Mode of Payment", dataIndex: "paymentMode", key: "paymentMode", width: 20, align: 'center', render: (v)=> String(v||'').toUpperCase() },
-    // Status is shown only for owner/admin/backend via conditional push below; keep slot reference here
-    { title: "Executive", dataIndex: "executive", key: "executive", width: 50 },
-    { title: "Job Card", dataIndex: "jcNo", key: "jcNo", width: 20, ellipsis: true },
-    { title: "Vehicle No.", dataIndex: "regNo", key: "regNo", width: 20 },
-    { title: "Type", dataIndex: "vehicleType", key: "vehicleType", width: 20, align: 'center', render: (v)=> String(v||'') },
+    { title: "Time / Branch", key: "timeBranch", width: 90, render: (_, r) => (
+      <div style={stackStyle}>
+        <div style={lineStyle}>{formatTs(r.ts)}</div>
+        <div style={lineStyle}><Text type="secondary">{r.branch || '—'}</Text></div>
+      </div>
+    ) },
+    { title: "Customer / Mobile", key: "customerMobile", width: 100, render: (_, r) => (
+      <div style={stackStyle}>
+        <div style={lineStyle}>{r.name || '—'}</div>
+        <div style={lineStyle}><Text type="secondary">{r.mobile || '—'}</Text></div>
+      </div>
+    ) },
+    { title: "Service / Status", key: "serviceStatus", width: 200, render: (_, r) => {
+        const model = String(r.model || '').trim() || '—';
+        const serviceType = String(r.serviceType || '').trim() || '—';
+        const amount = String(r.amount || '').trim() || '—';
+        const paymentMode = String(r.paymentMode || '').trim();
+        const line1 = `${model} || ${serviceType} || ${amount} || ${paymentMode ? paymentMode.toUpperCase() : '—'}`;
+        const exec = String(r.executive || '').trim() || '—';
+        const reg = String(r.regNo || '').trim() || '—';
+        return (
+          <div style={stackStyle}>
+            <div style={lineStyle}>{line1}</div>
+            <div style={lineStyle}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <Tag color={statusColor(r.status)}>{statusLabel(r.status)}</Tag>
+                <span>{`|| ${exec} || ${reg}`}</span>
+              </span>
+            </div>
+          </div>
+        );
+      }
+    },
   ];
   if (["backend","admin","owner"].includes(userRole)) {
-    // Insert Status column right after Mode of Payment
-    const statusColor = (v) => {
-      const s = String(v||'').toLowerCase();
-      if (s === 'completed') return 'green';
-      if (s === 'pending') return 'orange';
-      return 'default';
-    };
-    const statusLabel = (v) => {
-      const s = String(v||'').toLowerCase();
-      if (s === 'completed') return 'Completed';
-      if (s === 'pending') return 'Pending';
-      return (String(v||'') || '—');
-    };
-    const idxPayment = columns.findIndex(c => c.key === 'paymentMode');
-    if (idxPayment >= 0) {
-      columns.splice(idxPayment + 1, 0, {
-        title: "Status",
-        dataIndex: "status",
-        key: "status",
-        width: 20,
-        align: 'center',
-        render: (v) => <Tag color={statusColor(v)}>{statusLabel(v)}</Tag>,
-      });
-    }
-    columns.push({ title: "Remarks", key: "remarks", width: 60, render: (_, r) => {
+    columns.push({ title: "Remarks / Remark Text", key: "remarks", width: 250, render: (_, r) => {
         const rem = remarksMap[r.jcNo];
+        const remarkText = String(rem?.text || '');
         const level = String(rem?.level || '').toLowerCase();
         const color = level === 'alert' ? 'red' : level === 'warning' ? 'gold' : level === 'ok' ? 'green' : 'default';
-        const title = rem?.text ? rem.text : 'No remark yet';
+        const title = remarkText ? remarkText : 'No remark yet';
+        const isCompleted = String(r.status || '').toLowerCase() === 'completed';
+        const isInvoiceLoading = invoiceLoadingId === (r.jcNo || r.key || r.mobile || '');
         return (
-          <Space size={6}>
-            <Tooltip title={title}>
-              <Tag color={color}>{level ? level.toUpperCase() : '—'}</Tag>
+          <div style={stackStyle}>
+            <div style={lineStyle}>
+              <Space size={6}>
+                <Tooltip title={title}>
+                  <Tag color={color}>{level ? level.toUpperCase() : '—'}</Tag>
+                </Tooltip>
+                <Button size="small" onClick={()=> setRemarkModal({ open: true, refId: r.jcNo, level: rem?.level || 'ok', text: rem?.text || '' })}>Remark</Button>
+                <Tooltip title={isCompleted ? "Print service invoice" : "Complete post-service to enable invoice"}>
+                  <Button
+                    size="small"
+                    type="primary"
+                    ghost
+                    loading={isInvoiceLoading}
+                    disabled={!isCompleted}
+                    onClick={() => handleServiceInvoice(r)}
+                  >
+                    Service Invoice
+                  </Button>
+                </Tooltip>
+              </Space>
+            </div>
+            <Tooltip title={remarkText ? <span style={{ whiteSpace: 'pre-wrap' }}>{remarkText}</span> : null}>
+              <div style={lineStyle}>{remarkText || '—'}</div>
             </Tooltip>
-            <Button size="small" onClick={()=> setRemarkModal({ open: true, refId: r.jcNo, level: rem?.level || 'ok', text: rem?.text || '' })}>Remark</Button>
-          </Space>
+          </div>
         );
       }
     });
@@ -458,17 +619,20 @@ export default function Jobcards() {
           <Select
             value={branchFilter}
             onChange={setBranchFilter}
-            style={{ minWidth: 160 }}
+            style={{ minWidth: 120 }}
             disabled={!['owner','admin','backend'].includes(userRole)}
             options={branches.map(b => ({ value: b, label: b === 'all' ? 'All Branches' : b }))}
           />
-          <Select value={serviceFilter} onChange={setServiceFilter} style={{ minWidth: 140 }}
+          <Select value={serviceFilter} onChange={setServiceFilter} style={{ minWidth: 100 }}
                   options={services.map(m => ({ value: m, label: m === 'all' ? 'All Services' : String(m).toUpperCase() }))} />
+          <Select value={statusFilter} onChange={setStatusFilter} style={{ minWidth: 100 }}
+                  options={[{ value: 'all', label: 'All Statuses' }, { value: 'pending', label: 'Pending' }, { value: 'completed', label: 'Completed' }]} />
+          
           <DatePicker.RangePicker value={dateRange} onChange={(v)=>{ setDateRange(v); setQuickKey(null); }} allowClear />
           <Button size="small" type={quickKey==='today'?'primary':'default'} onClick={()=>{ const t = dayjs(); setDateRange([t,t]); setQuickKey('today'); }}>Today</Button>
           <Button size="small" type={quickKey==='yesterday'?'primary':'default'} onClick={()=>{ const y = dayjs().subtract(1,'day'); setDateRange([y,y]); setQuickKey('yesterday'); }}>Yesterday</Button>
           <Button size="small" onClick={()=>{ setDateRange(null); setQuickKey(null); }}>Clear</Button>
-          <Input placeholder="Search name/mobile/jc/vehicle/model/mode" allowClear value={q} onChange={(e)=>setQ(e.target.value)} style={{ minWidth: 280 }} />
+          <Input placeholder="Search name/mobile/jc/vehicle/model/mode" allowClear value={q} onChange={(e)=>setQ(e.target.value)} style={{ minWidth: 120 }} />
         </Space>
         <div style={{ flex: 1 }} />
         <Space>
@@ -495,7 +659,9 @@ export default function Jobcards() {
         dataSource={visibleRows}
         columns={columns}
         loading={loading && !hasCache}
-        size={isMobile ? 'small' : 'middle'}
+        size="small"
+        className="compact-table"
+        tableLayout="fixed"
         pagination={USE_SERVER_PAG ? {
           current: page,
           pageSize,
@@ -513,7 +679,7 @@ export default function Jobcards() {
           showTotal: (total, range) => `${range[0]}-${range[1]} of ${total}`,
         } : false)}
         rowKey={(r) => `${r.jcNo}-${r.mobile}-${r.ts}-${r.key}`}
-        scroll={{ x: 'max-content', y: tableHeight }}
+        scroll={{ y: tableHeight }}
       />
 
       {!USE_SERVER_PAG && renderMode==='loadMore' && visibleRows.length < filtered.length ? (
@@ -541,11 +707,12 @@ export default function Jobcards() {
           setRemarkSaving(true);
           try {
             if (!GAS_URL) { message.error('Jobcards GAS URL not configured'); return; }
-            const body = GAS_SECRET ? { action: 'remark', jcNo: remarkModal.refId, level: remarkModal.level, text: remarkModal.text, secret: GAS_SECRET } : { action: 'remark', jcNo: remarkModal.refId, level: remarkModal.level, text: remarkModal.text };
+            const stampedText = stampRemark(remarkModal.text);
+            const body = GAS_SECRET ? { action: 'remark', jcNo: remarkModal.refId, level: remarkModal.level, text: stampedText, secret: GAS_SECRET } : { action: 'remark', jcNo: remarkModal.refId, level: remarkModal.level, text: stampedText };
             const resp = await saveJobcardViaWebhook({ webhookUrl: GAS_URL, method: 'POST', payload: body });
             if (resp && (resp.ok || resp.success)) {
-              setRemarksMap((m)=> ({ ...m, [remarkModal.refId]: { level: remarkModal.level, text: remarkModal.text } }));
-              setRows(prev => prev.map(x => x.jcNo === remarkModal.refId ? { ...x, RemarkLevel: remarkModal.level.toUpperCase(), RemarkText: remarkModal.text, _remarkLevel: remarkModal.level, _remarkText: remarkModal.text } : x));
+              setRemarksMap((m)=> ({ ...m, [remarkModal.refId]: { level: remarkModal.level, text: stampedText } }));
+              setRows(prev => prev.map(x => x.jcNo === remarkModal.refId ? { ...x, RemarkLevel: remarkModal.level.toUpperCase(), RemarkText: stampedText, _remarkLevel: remarkModal.level, _remarkText: stampedText } : x));
               message.success('Remark saved to sheet');
               setRemarkModal({ open: false, refId: '', level: 'ok', text: '' });
             } else { message.error('Save failed'); }
@@ -563,6 +730,12 @@ export default function Jobcards() {
           <Input maxLength={140} showCount value={remarkModal.text} onChange={(e)=> setRemarkModal((s)=> ({ ...s, text: e.target.value }))} placeholder="Short note (optional)" />
         </Space>
       </Modal>
+      <PostServiceSheet
+        ref={invoiceRef}
+        active={invoiceOpen}
+        vals={invoiceData?.vals || {}}
+        totals={invoiceData?.totals || {}}
+      />
     </div>
   );
 }
@@ -571,10 +744,9 @@ export default function Jobcards() {
 function formatTs(v) {
   if (!v) return <Text type="secondary">—</Text>;
   try {
-    const d = v instanceof Date ? v : new Date(String(v));
-    if (isNaN(d.getTime())) return String(v);
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const ms = parseTsMs(v);
+    if (!ms) return String(v);
+    return dayjs(ms).format("DD-MM-YYYY HH:mm");
   } catch { return String(v); }
 }
 
@@ -585,16 +757,18 @@ function parseTsMs(v) {
   const s = String(v).trim();
   const dIso = new Date(s);
   if (!isNaN(dIso.getTime())) return dIso.getTime();
-  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?$/i);
+  const m = s.match(/^(\d{1,2})([/-])(\d{1,2})\2(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?$/i);
   if (m) {
-    let a = parseInt(m[1], 10), b = parseInt(m[2], 10), y = parseInt(m[3], 10);
+    const sep = m[2];
+    let a = parseInt(m[1], 10), b = parseInt(m[3], 10), y = parseInt(m[4], 10);
     if (y < 100) y += 2000;
     let month, day;
-    if (a > 12) { day = a; month = b - 1; } else { month = a - 1; day = b; }
-    let hh = m[4] ? parseInt(m[4], 10) : 0;
-    const mm = m[5] ? parseInt(m[5], 10) : 0;
-    const ss = m[6] ? parseInt(m[6], 10) : 0;
-    const ap = (m[7] || '').toUpperCase();
+    if (sep === '-') { day = a; month = b - 1; }
+    else if (a > 12) { day = a; month = b - 1; } else { month = a - 1; day = b; }
+    let hh = m[5] ? parseInt(m[5], 10) : 0;
+    const mm = m[6] ? parseInt(m[6], 10) : 0;
+    const ss = m[7] ? parseInt(m[7], 10) : 0;
+    const ap = (m[8] || '').toUpperCase();
     if (ap === 'PM' && hh < 12) hh += 12;
     if (ap === 'AM' && hh === 12) hh = 0;
     const d = new Date(y, month, day, hh, mm, ss);

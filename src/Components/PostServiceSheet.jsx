@@ -1,6 +1,7 @@
 // components/PostServiceSheet.jsx
 import React, { useMemo, forwardRef } from "react";
 import { inr, fmtDate, amountInWords } from "../utils/printUtils";
+import useOwnerProfile from "../hooks/useOwnerProfile";
 
 /**
  * Updated for Android-safe printing (when used with handleSmartPrint in parent)
@@ -9,6 +10,8 @@ import { inr, fmtDate, amountInWords } from "../utils/printUtils";
  * - Scopes print to the active sheet to avoid blank/extra pages
  */
 const PostServiceSheet = forwardRef(function PostServiceSheet({ active, vals, totals }, ref) {
+  const ownerProfile = useOwnerProfile();
+  const logoSrc = ownerProfile.logoUrl || "/motera-logoprint.jpg";
   const rows = Array.isArray(vals?.labourRows) ? vals.labourRows : [];
   const items = rows.map((r, idx) => ({
     sn: idx + 1,
@@ -34,7 +37,7 @@ const PostServiceSheet = forwardRef(function PostServiceSheet({ active, vals, to
   const kmVal = parseKm(vals?.km);
   const nextServiceKm = kmVal != null ? kmVal + 2000 : null;
   const branch = String(vals?.branch || "").trim();
-  const isNH = branch === "Byadarahalli"; // Switch branding for Byadarahalli
+  const isByadarahalli = branch === "Byadarahalli"; // Switch address block for Byadarahalli
   const mobileDigits = useMemo(() => {
     const d = String(vals?.custMobile || "").replace(/\D/g, "").slice(-10);
     return d || "";
@@ -145,14 +148,14 @@ img { max-width: 100%; height: auto; background: transparent; }
           <div className="bill-box">
             <div className="hdr-grid">
               <img
-                src={isNH ? "/honda-logo.png" : "/motera-logoprint.jpg"}
-                alt={isNH ? "NH Motors" : "Shantha Motors"}
+                src={logoSrc}
+                alt="Motera Logo"
                 style={{ width: "100%", maxHeight: 100 }}
               />
               <div className="shop-title">
-                {isNH ? (
+                <div className="en">MOTERA | ಮೋಟೆರಾ</div>
+                {isByadarahalli ? (
                   <>
-                    <div className="en">NH Motors | ಎನ್ ಎಚ್ ಮೋಟರ್ಸ್</div>
                     <div className="shop-sub" style={{ marginTop: 4 }}>
                       Site No. 116/1, Bydarahalli, Magadi Main Road, Opp.<br />
                       HP Petrol Bunk, Bangalore - 560091
@@ -161,8 +164,7 @@ img { max-width: 100%; height: auto; background: transparent; }
                   </>
                 ) : (
                   <>
-                    <div className="en">SHANTHA MOTORS | ಶಾಂತ ಮೋಟರ್ಸ್</div>
-                    <div className="shop-sub">Multi Brand Two Wheeler Sales &amp; Service</div>
+                    <div className="shop-sub">Motera • Multi-brand two-wheeler sales &amp; service</div>
                     <div className="shop-sub">Mob No : 9731366921 / 8073283502 </div>
                     <div className="tiny">Kadabagere • Muddinapalya  • Andrahalli • Tavarekere • Hegganahalli • Channenahalli • Nelagadrahalli</div>
                   </>
@@ -258,7 +260,7 @@ img { max-width: 100%; height: auto; background: transparent; }
             <div className="sign-row">
               <div />
               <div className="sign-box tiny">
-                {isNH ? "For NH Motors" : "For Shantha Motors"}<br/>Authorised Signatory
+                For Motera<br/>Authorised Signatory
               </div>
             </div>
 

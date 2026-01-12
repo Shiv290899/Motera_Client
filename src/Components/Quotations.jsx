@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState, useCallback } from "react";
-import { Table, Grid, Space, Button, Select, Input, Tag, Typography, message, DatePicker, Modal } from "antd";
+import { Table, Grid, Space, Button, Select, Input, Tag, Typography, message, DatePicker, Modal, Tooltip } from "antd";
 import useDebouncedValue from "../hooks/useDebouncedValue";
 import { saveBookingViaWebhook } from "../apiCalls/forms";
 import dayjs from "dayjs";
 import { useNavigate } from "react-router-dom";
 import { exportToCsv } from "../utils/csvExport";
-import { uniqNoCaseSorted } from "../utils/uniqNoCase";
+import { normalizeKey, uniqCaseInsensitive, toKeySet } from "../utils/caseInsensitive";
 
 const { Text } = Typography;
 
@@ -21,8 +21,10 @@ const HEAD = {
   model: ["Model", "Bike Model"],
   variant: ["Variant"],
   price: ["On-Road Price", "On Road Price", "Price"],
+  offerings: ["Offerings", "Remarks", "Remark", "Quotation Remarks"],
   payload: ["Payload"],
   status: ["Status", "FollowUp Status", "Quotation Status"],
+  followUpNotes: ["Follow-up Notes", "Follow Up Notes", "Followup Notes", "Notes"],
 };
 
 const pick = (obj, aliases) => String(aliases.map((k) => obj[k] ?? "").find((v) => v !== "") || "").trim();
@@ -69,7 +71,7 @@ export default function Quotations() {
       if (Array.isArray(u?.branches)) {
         u.branches.forEach((b)=>{ const nm = typeof b === 'string' ? b : (b?.name || ''); if (nm) list.push(nm); });
       }
-      setAllowedBranches(uniqNoCaseSorted(list.filter(Boolean)));
+      setAllowedBranches(Array.from(new Set(list.filter(Boolean))));
     } catch { /* ignore */ }
   }, []);
 
@@ -88,7 +90,7 @@ export default function Quotations() {
 
   const gasConfig = useMemo(() => {
     const DEFAULT_QUOT_URL =
-      "https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=quotation";
+      "https://script.google.com/macros/s/AKfycbwd-hKTwEfAretqEn7c_jIqNgheFgDaSVjCO3wHHQxgXQbbd8grLr8tUaRyLoAJWe4O/exec?module=quotation";
     const GAS_URL = import.meta.env.VITE_QUOTATION_GAS_URL || DEFAULT_QUOT_URL;
     const SECRET = import.meta.env.VITE_QUOTATION_GAS_SECRET || '';
     return { GAS_URL, SECRET };
@@ -107,6 +109,20 @@ export default function Quotations() {
     const model = fv.bikeModel || fv.model || pick(obj, HEAD.model);
     const variant = fv.variant || pick(obj, HEAD.variant);
     const price = String(fv.onRoadPrice || pick(obj, HEAD.price) || '').trim();
+    const offerings = String(
+      fv.remarks ||
+      (payload && payload.remarks) ||
+      pick(obj, HEAD.offerings) ||
+      ''
+    ).trim();
+    const followUpNotes = String(
+      (payload && payload.followUp && payload.followUp.notes) ||
+      (payload && payload.closeNotes) ||
+      (payload && payload.followupNotes) ||
+      (payload && payload.notes) ||
+      pick(obj, HEAD.followUpNotes) ||
+      ''
+    ).trim();
     const remarkLevelRaw = (payload && payload.remark && payload.remark.level) || obj.RemarkLevel || obj.remarkLevel || '';
     const remarkTextRaw = (payload && payload.remark && payload.remark.text) || obj.RemarkText || obj.remarkText || '';
     const remarkLevelNorm = String(remarkLevelRaw || '').toLowerCase();
@@ -123,9 +139,11 @@ export default function Quotations() {
       model,
       variant,
       price,
+      offerings,
       mode: mode || (payload && payload.mode) || '',
       brand,
       status,
+      followUpNotes,
       RemarkLevel: remarkLevelRaw || '',
       RemarkText: remarkTextRaw || '',
       _remarkLevel: remarkLevelNorm,
@@ -232,56 +250,35 @@ export default function Quotations() {
   const optionRows = filterSourceRows.length ? filterSourceRows : rows;
 
   const branches = useMemo(() => {
-    const norm = (s) => String(s || '').trim();
-    const set = new Map(); // lower -> display
-    optionRows.forEach((r) => {
-      const raw = norm(r.branch);
-      if (!raw) return;
-      const low = raw.toLowerCase();
-      if (!set.has(low)) set.set(low, raw);
-    });
-    const opts = Array.from(set.values());
+    const opts = uniqCaseInsensitive(optionRows.map((r) => r.branch));
     const all = ["all", ...opts];
     const isPriv = ["owner","admin","backend"].includes(userRole);
     if (!isPriv && allowedBranches.length) {
-      const allowedLc = new Set(allowedBranches.map((b)=>String(b||'').toLowerCase()));
-      return all.filter((b)=> b==='all' || allowedLc.has(String(b||'').toLowerCase()));
+      const allowedSet = toKeySet(allowedBranches);
+      return all.filter((b)=> b==='all' || allowedSet.has(normalizeKey(b)));
     }
     return all;
   }, [optionRows, userRole, allowedBranches]);
   const modes = useMemo(() => {
-    const norm = (s) => String(s || '').trim();
-    const set = new Map();
-    optionRows.forEach((r) => {
-      const raw = norm(r.mode);
-      if (!raw) return;
-      const low = raw.toLowerCase();
-      if (!set.has(low)) set.set(low, raw);
-    });
-    return ["all", ...Array.from(set.values())];
+    return ["all", ...uniqCaseInsensitive(optionRows.map((r) => r.mode))];
   }, [optionRows]);
   const statuses = useMemo(() => {
-    const norm = (s) => String(s || '').trim();
-    const set = new Map();
-    optionRows.forEach((r) => {
-      const raw = norm(r.status);
-      if (!raw || raw.toLowerCase() === 'lost') return;
-      const low = raw.toLowerCase();
-      if (!set.has(low)) set.set(low, raw);
-    });
-    return ["all", ...Array.from(set.values())];
+    const cleaned = optionRows
+      .map((r) => r.status)
+      .filter((s) => normalizeKey(s) !== 'lost');
+    return ["all", ...uniqCaseInsensitive(cleaned)];
   }, [optionRows]);
 
   const applyFilters = useCallback((list) => {
-    const allowedSet = new Set((allowedBranches || []).map((b)=>String(b||'').toLowerCase()));
-    const norm = (s) => String(s || '').toLowerCase().trim();
+    const allowedSet = toKeySet(allowedBranches);
     const scoped = (list || []).filter((r) => {
+      const branchKey = normalizeKey(r.branch);
       if (allowedSet.size && !["owner","admin","backend"].includes(userRole)) {
-        if (!allowedSet.has(norm(r.branch))) return false;
+        if (!allowedSet.has(branchKey)) return false;
       }
-      if (branchFilter !== "all" && norm(r.branch) !== norm(branchFilter)) return false;
-      if (modeFilter !== "all" && norm(r.mode) !== norm(modeFilter)) return false;
-      if (statusFilter !== 'all' && norm(r.status) !== norm(statusFilter)) return false;
+      if (branchFilter !== "all" && branchKey !== normalizeKey(branchFilter)) return false;
+      if (modeFilter !== "all" && normalizeKey(r.mode) !== normalizeKey(modeFilter)) return false;
+      if (statusFilter !== 'all' && normalizeKey(r.status) !== normalizeKey(statusFilter)) return false;
       if (dateRange && dateRange[0] && dateRange[1]) {
         const start = dateRange[0].startOf('day').valueOf();
         const end = dateRange[1].endOf('day').valueOf();
@@ -291,7 +288,7 @@ export default function Quotations() {
       if (debouncedQ) {
         const s = debouncedQ.toLowerCase();
         if (![
-          r.name, r.mobile, r.serialNo, r.company, r.model, r.variant, r.branch, r.executive, r.status
+          r.name, r.mobile, r.serialNo, r.company, r.model, r.variant, r.branch, r.executive, r.status, r.followUpNotes
         ].some((v) => String(v || "").toLowerCase().includes(s))) return false;
       }
       return true;
@@ -381,7 +378,7 @@ export default function Quotations() {
 
   const statusColor = (s) => {
     const k = String(s || '').toLowerCase();
-    return k === 'converted' ? 'green'
+    return (k === 'converted' || k === 'booked') ? 'green'
       : k === 'completed' ? 'green'
       : k === 'pending' ? 'orange'
       : k === 'not_interested' ? 'default'
@@ -391,30 +388,116 @@ export default function Quotations() {
       : k === 'no_response' ? 'gold'
       : 'default';
   };
+  const statusLabel = (s) => {
+    const raw = String(s || '').trim();
+    if (!raw) return '—';
+    const k = raw.toLowerCase();
+    if (k === 'converted') return 'Booked';
+    return raw.replace(/_/g, ' ');
+  };
+  const stampRemark = (note) => {
+    const ts = dayjs().format('DD-MM-YYYY HH:mm');
+    const text = String(note || '').trim();
+    return text ? `${ts} - ${text}` : ts;
+  };
+
+  const stackStyle = { display: 'flex', flexDirection: 'column', gap: 2, lineHeight: 1.2 };
+  const lineStyle = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+  const smallLineStyle = { ...lineStyle, fontSize: 8 };
+  const metaLineStyle = { ...lineStyle, fontSize: 10, lineHeight: 1.15 };
+  const twoLineClamp = {
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 3,
+    overflow: 'hidden',
+    whiteSpace: 'normal',
+    fontSize: 8,
+    lineHeight: 1.2,
+  };
 
   const columns = [
-    { title: "Time", dataIndex: "ts", key: "ts", width: 20, ellipsis: true, render: (v)=> formatTs(v) },
-    { title: "Branch", dataIndex: "branch", key: "branch", width: 50 },
-    { title: "Customer Name", dataIndex: "name", key: "name", width: 50, ellipsis: true },
-    { title: "Mobile No", dataIndex: "mobile", key: "mobile", width: 80 },
-    { title: "Status", dataIndex: "status", key: "status", width: 50, render: (v)=> <Tag color={statusColor(v)}>{String(v||'').replace(/_/g,' ')||'—'}</Tag> },
-    { title: "Model", dataIndex: "model", key: "model", width: 50 },
-    { title: "Variant", dataIndex: "variant", key: "variant", width: 50 },
-    { title: "On-Road Price", dataIndex: "price", key: "price", width: 30, align: 'right' },
-    { title: "Mode", dataIndex: "mode", key: "mode", width: 30, align: 'center', render: (v)=> String(v||'').toUpperCase() },
-    { title: "Executive", dataIndex: "executive", key: "executive", width: 30 },
-    { title: "Company", dataIndex: "company", key: "company", width: 30 },
-    { title: "Quotation No", dataIndex: "serialNo", key: "serialNo", width: 50, ellipsis: true },
+    { title: "Time / Branch", key: "timeBranch", width: 120, render: (_, r) => (
+      <div style={stackStyle}>
+        <div style={lineStyle}>{formatTs(r.ts)}</div>
+        <div style={lineStyle}><Text type="secondary">{r.branch || '—'}</Text></div>
+      </div>
+    ) },
+    { title: "Customer / Mobile", key: "customerMobile", width: 100, render: (_, r) => (
+      <div style={stackStyle}>
+        <div style={lineStyle}>{r.name || '—'}</div>
+        <div style={lineStyle}><Text type="secondary">{r.mobile || '—'}</Text></div>
+      </div>
+    ) },
+    
+    { title: "Offerings", key: "offerings", width: 220, render: (_, r) => {
+      const offerings = String(r.offerings || '').trim();
+      return (
+        <div style={stackStyle}>
+          {offerings ? (
+            <Tooltip title={<span style={{ whiteSpace: 'pre-wrap' }}>{offerings}</span>} placement="topLeft">
+              <div style={twoLineClamp}>{offerings}</div>
+            </Tooltip>
+          ) : (
+            <div style={twoLineClamp}></div>
+          )}
+        </div>
+      );
+    } },
+    { title: "Status / Follow-up Notes", key: "statusNotes", width: 250, render: (_, r) => {
+      const notes = String(r.followUpNotes || '').trim();
+      return (
+        <div style={stackStyle}>
+          <div style={lineStyle}>
+            <Tag color={statusColor(r.status)}>{statusLabel(r.status)}</Tag>
+          </div>
+          {notes ? (
+            <Tooltip title={<span style={{ whiteSpace: 'pre-wrap' }}>{notes}</span>} placement="topLeft">
+              <div style={smallLineStyle}>{notes}</div>
+            </Tooltip>
+          ) : (
+            <div style={smallLineStyle}></div>
+          )}
+        </div>
+      );
+    } },
+    { title: "Model / ORP / Mode / Executive", key: "vehicleMeta", width: 190, render: (_, r) => {
+        const model = String(r.model || '').trim();
+        const variant = String(r.variant || '').trim();
+        const modelVariant = model && variant ? `${model} || ${variant}` : (model || variant || '—');
+        const price = String(r.price || '').trim() || '—';
+        const mode = String(r.mode || '').trim();
+        const exec = String(r.executive || '').trim();
+        const metaLine = [
+          price,
+          mode ? mode.toUpperCase() : '—',
+          exec || '—',
+        ].join(' || ');
+        return (
+          <div style={stackStyle}>
+            <div style={metaLineStyle}>{modelVariant}</div>
+            <div style={metaLineStyle}>{metaLine}</div>
+          </div>
+        );
+      }
+    },
   ];
   if (["backend","admin","owner"].includes(userRole)) {
-    columns.push({ title: "Remarks", key: "remarks", width: 60, render: (_, r) => {
+    columns.push({ title: "Remarks / Remark Text", key: "remarks", width: 240, render: (_, r) => {
         const rem = remarksMap[r.serialNo];
+        const remarkText = String(rem?.text || '');
         const color = rem?.level === 'alert' ? 'red' : rem?.level === 'warning' ? 'gold' : rem?.level === 'ok' ? 'green' : 'default';
         return (
-          <Space size={6}>
-            <Tag color={color}>{rem?.level ? rem.level.toUpperCase() : '—'}</Tag>
-            <Button size="small" onClick={()=> setRemarkModal({ open: true, refId: r.serialNo, level: rem?.level || 'ok', text: rem?.text || '' })}>Remark</Button>
-          </Space>
+          <div style={stackStyle}>
+            <div style={lineStyle}>
+              <Space size={6}>
+                <Tag color={color}>{rem?.level ? rem.level.toUpperCase() : '—'}</Tag>
+                <Button size="small" onClick={()=> setRemarkModal({ open: true, refId: r.serialNo, level: rem?.level || 'ok', text: rem?.text || '' })}>Remark</Button>
+              </Space>
+            </div>
+            <Tooltip title={remarkText ? <span style={{ whiteSpace: 'pre-wrap' }}>{remarkText}</span> : null}>
+              <div style={lineStyle}>{remarkText || '—'}</div>
+            </Tooltip>
+          </div>
         );
       }
     });
@@ -431,19 +514,19 @@ export default function Quotations() {
           <Select
             value={branchFilter}
             onChange={setBranchFilter}
-            style={{ minWidth: 160 }}
+            style={{ minWidth: 120 }}
             disabled={!['owner','admin','backend'].includes(userRole)}
             options={branches.map(b => ({ value: b, label: b === 'all' ? 'All Branches' : b }))}
           />
-          <Select value={modeFilter} onChange={setModeFilter} style={{ minWidth: 140 }}
+          <Select value={modeFilter} onChange={setModeFilter} style={{ minWidth: 100 }}
                   options={modes.map(m => ({ value: m, label: m === 'all' ? 'All Modes' : String(m).toUpperCase() }))} />
-          <Select value={statusFilter} onChange={setStatusFilter} style={{ minWidth: 160 }}
-                  options={statuses.map(s => ({ value: s, label: s === 'all' ? 'All Statuses' : String(s).replace(/_/g,' ') }))} />
+          <Select value={statusFilter} onChange={setStatusFilter} style={{ minWidth: 100 }}
+                  options={statuses.map(s => ({ value: s, label: s === 'all' ? 'All Statuses' : statusLabel(s) }))} />
           <DatePicker.RangePicker value={dateRange} onChange={(v)=>{ setDateRange(v); setQuickKey(null); }} allowClear />
           <Button size="small" type={quickKey==='today'?'primary':'default'} onClick={()=>{ const t = dayjs(); setDateRange([t,t]); setQuickKey('today'); }}>Today</Button>
           <Button size="small" type={quickKey==='yesterday'?'primary':'default'} onClick={()=>{ const y = dayjs().subtract(1,'day'); setDateRange([y,y]); setQuickKey('yesterday'); }}>Yesterday</Button>
           <Button size="small" onClick={()=>{ setDateRange(null); setQuickKey(null); }}>Clear</Button>
-          <Input placeholder="Search name/mobile/quotation/company/model" allowClear value={q} onChange={(e)=>setQ(e.target.value)} style={{ minWidth: 260 }} />
+          <Input placeholder="Search name/mobile/quotation/company/model" allowClear value={q} onChange={(e)=>setQ(e.target.value)} style={{ minWidth: 150 }} />
         </Space>
         <div style={{ flex: 1 }} />
         <Space>
@@ -470,8 +553,10 @@ export default function Quotations() {
         dataSource={visibleRows}
         columns={columns}
         loading={loading && !hasCache}
-        size={isMobile ? 'small' : 'middle'}
-        scroll={{ x: 'max-content', y: tableHeight }}
+        size="small"
+        className="compact-table"
+        scroll={{ y: tableHeight }}
+        tableLayout="fixed"
         pagination={USE_SERVER_PAG ? {
           current: page,
           pageSize,
@@ -515,17 +600,18 @@ export default function Quotations() {
           try {
             // Sheet-only: call GAS to persist
             if (!GAS_URL) { message.error('Quotation GAS URL not configured'); return; }
-            const body = GAS_SECRET ? { action: 'remark', serialNo: remarkModal.refId, level: remarkModal.level, text: remarkModal.text, secret: GAS_SECRET } : { action: 'remark', serialNo: remarkModal.refId, level: remarkModal.level, text: remarkModal.text };
+            const stampedText = stampRemark(remarkModal.text);
+            const body = GAS_SECRET ? { action: 'remark', serialNo: remarkModal.refId, level: remarkModal.level, text: stampedText, secret: GAS_SECRET } : { action: 'remark', serialNo: remarkModal.refId, level: remarkModal.level, text: stampedText };
             const resp = await saveBookingViaWebhook({ webhookUrl: GAS_URL, method: 'POST', payload: body });
             if (resp && (resp.ok || resp.success)) {
-              setRemarksMap((m)=> ({ ...m, [remarkModal.refId]: { level: remarkModal.level, text: remarkModal.text } }));
+              setRemarksMap((m)=> ({ ...m, [remarkModal.refId]: { level: remarkModal.level, text: stampedText } }));
               // also update rows array for immediate tag color
               setRows(prev => prev.map(x => x.serialNo === remarkModal.refId ? {
                 ...x,
                 RemarkLevel: remarkModal.level.toUpperCase(),
-                RemarkText: remarkModal.text,
+                RemarkText: stampedText,
                 _remarkLevel: remarkModal.level,
-                _remarkText: remarkModal.text
+                _remarkText: stampedText
               } : x));
               message.success('Remark saved to sheet');
               // Also mirror to Google Sheet via Apps Script (kept short and resilient)
@@ -553,10 +639,9 @@ export default function Quotations() {
 function formatTs(v) {
   if (!v) return <Text type="secondary">—</Text>;
   try {
-    const d = v instanceof Date ? v : new Date(String(v));
-    if (isNaN(d.getTime())) return String(v);
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const ms = parseTsMs(v);
+    if (!ms) return String(v);
+    return dayjs(ms).format("DD-MM-YYYY HH:mm");
   } catch { return String(v); }
 }
 
@@ -567,16 +652,18 @@ function parseTsMs(v) {
   const s = String(v).trim();
   const dIso = new Date(s);
   if (!isNaN(dIso.getTime())) return dIso.getTime();
-  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?$/i);
+  const m = s.match(/^(\d{1,2})([/-])(\d{1,2})\2(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?$/i);
   if (m) {
-    let a = parseInt(m[1], 10), b = parseInt(m[2], 10), y = parseInt(m[3], 10);
+    const sep = m[2];
+    let a = parseInt(m[1], 10), b = parseInt(m[3], 10), y = parseInt(m[4], 10);
     if (y < 100) y += 2000;
     let month, day;
-    if (a > 12) { day = a; month = b - 1; } else { month = a - 1; day = b; }
-    let hh = m[4] ? parseInt(m[4], 10) : 0;
-    const mm = m[5] ? parseInt(m[5], 10) : 0;
-    const ss = m[6] ? parseInt(m[6], 10) : 0;
-    const ap = (m[7] || '').toUpperCase();
+    if (sep === '-') { day = a; month = b - 1; }
+    else if (a > 12) { day = a; month = b - 1; } else { month = a - 1; day = b; }
+    let hh = m[5] ? parseInt(m[5], 10) : 0;
+    const mm = m[6] ? parseInt(m[6], 10) : 0;
+    const ss = m[7] ? parseInt(m[7], 10) : 0;
+    const ap = (m[8] || '').toUpperCase();
     if (ap === 'PM' && hh < 12) hh += 12;
     if (ap === 'AM' && hh === 12) hh = 0;
     const d = new Date(y, month, day, hh, mm, ss);
@@ -585,6 +672,6 @@ function parseTsMs(v) {
   return null;
 }
   // GAS endpoints (same as used for list)
-  const DEFAULT_QUOT_URL = "https://script.google.com/macros/s/AKfycbzIQzSqfmymoRvVdq1q6VhTHdwwmLOyAq4POVY1RRJCnpNqJhWLnN5VydfwKGDls68B/exec?module=quotation";
+  const DEFAULT_QUOT_URL = "https://script.google.com/macros/s/AKfycbwd-hKTwEfAretqEn7c_jIqNgheFgDaSVjCO3wHHQxgXQbbd8grLr8tUaRyLoAJWe4O/exec?module=quotation";
   const GAS_URL = import.meta.env.VITE_QUOTATION_GAS_URL || DEFAULT_QUOT_URL;
   const GAS_SECRET = import.meta.env.VITE_QUOTATION_GAS_SECRET || '';
