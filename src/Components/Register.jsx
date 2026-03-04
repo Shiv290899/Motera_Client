@@ -1,6 +1,7 @@
 import React from "react";
-import { Button, Form, Input, Checkbox, Typography, message } from "antd";
-import { Link, useNavigate } from "react-router-dom";
+import { getOwnerOrgName } from "../utils/ownerConfig";
+import { Button, Form, Input, Checkbox, Typography, message, Alert } from "antd";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import "./auth.css";
 import { RegisterUser } from "../apiCalls/users";
 
@@ -9,16 +10,29 @@ const { Title, Text } = Typography;
 function Register() {
   const [form] = Form.useForm();
   const navigate = useNavigate();
+  const location = useLocation();
   const [loading, setLoading] = React.useState(false);
+  const [submitError, setSubmitError] = React.useState("");
   // Local message instance to guarantee context
   const [msgApi, msgCtx] = message.useMessage();
 
+  const inviteToken = React.useMemo(() => {
+    try {
+      const params = new URLSearchParams(location.search || "");
+      return String(params.get("invite") || "").trim();
+    } catch {
+      return "";
+    }
+  }, [location.search]);
+
   const onFinish = async (values) => {
+    setSubmitError("");
     const payload = {
       name: values.name,
       email: values.email,
       phone: values.phone,
       password: values.password,
+      ...(inviteToken ? { inviteToken } : {}),
     };
 
     try {
@@ -29,12 +43,18 @@ function Register() {
         navigate("/login");
       } else if (data?.code === 409) {
         // Friendly duplicate case from API helper
-        msgApi.warning(data?.message || "Email or mobile already registered.");
+        const warnMsg = data?.message || "Email or mobile already registered.";
+        setSubmitError(warnMsg);
+        msgApi.warning(warnMsg);
       } else if (data && data.success === false) {
-        msgApi.error(data?.message || "Registration failed. Try again.");
+        const errMsg = data?.message || "Registration failed. Try again.";
+        setSubmitError(errMsg);
+        msgApi.error(errMsg);
       } else {
         // Fallback when helper threw nothing but result is unexpected
-        msgApi.error("Registration failed. Please try again.");
+        const errMsg = "Registration failed. Please try again.";
+        setSubmitError(errMsg);
+        msgApi.error(errMsg);
       }
     } catch (err) {
       const status = err?.response?.status;
@@ -42,6 +62,7 @@ function Register() {
         err?.response?.data?.message ||
         err?.message ||
         "Registration failed. Please try again.";
+      setSubmitError(apiMsg);
       if (status === 409) {
         msgApi.warning(apiMsg);
       } else {
@@ -62,7 +83,8 @@ function Register() {
       <div className="auth-box">
         <Title level={2} className="title">Create your account</Title>
         <Text type="secondary" className="subtitle">
-          Join Shantha Motors to manage bookings and more.
+          Join {getOwnerOrgName() || "Motera"} to manage bookings and more.
+          {inviteToken ? " (Invite link detected)" : ""}
         </Text>
 
         <Form
@@ -70,9 +92,19 @@ function Register() {
           layout="vertical"
           onFinish={onFinish}
           onFinishFailed={onFinishFailed}
+          onValuesChange={() => { if (submitError) setSubmitError(""); }}
           className="auth-form"
           requiredMark={false}
         >
+          {submitError ? (
+            <Alert
+              type="warning"
+              showIcon
+              message={submitError}
+              style={{ marginBottom: 12 }}
+            />
+          ) : null}
+
           {/* Name */}
           <Form.Item
             label="Full Name"
@@ -143,20 +175,64 @@ function Register() {
             <Input.Password size="large" placeholder="Re-enter your password" className="input-field" />
           </Form.Item>
 
-          {/* Terms */}
+          {/* Terms and Conditions */}
+          <div className="terms-container">
+            <h5>1. Introduction</h5>
+            <p>
+              Welcome to {getOwnerOrgName() || "Motera"}. By creating an
+              account, you agree to be bound by these Terms and Conditions.
+            </p>
+            <h5>2. Data Privacy and Communication</h5>
+            <p>
+              We collect personal information such as your name, email, and
+              phone number to provide and improve our services. By registering,
+              you consent to us contacting you via Email, SMS, and/or WhatsApp
+              for service reminders, booking confirmations, and promotional
+              offers. You may opt-out of promotional messages at any time.
+            </p>
+            <h5>3. User Account</h5>
+            <p>
+              You are responsible for maintaining the confidentiality of your
+              account and password. You agree to accept responsibility for all
+              activities that occur under your account.
+            </p>
+            <h5>4. Service Bookings and Payments</h5>
+            <p>
+              All bookings for vehicle services are subject to availability and
+              our confirmation. Payment for all services is due upon completion
+              as specified in the job card or invoice.
+            </p>
+            <h5>5. Limitation of Liability</h5>
+            <p>
+              {getOwnerOrgName() || "Motera"} will not be liable for any
+              indirect, incidental, or consequential loss or damages arising from
+              the use of our services. Our total liability is limited to the
+              amount paid by you for the specific service.
+            </p>
+            <h5>6. Governing Law</h5>
+            <p>
+              These terms are governed by the laws of India. Any disputes will
+              be subject to the exclusive jurisdiction of the courts in your
+              local area.
+            </p>
+          </div>
+
           <Form.Item
             name="terms"
             valuePropName="checked"
             rules={[
               {
-                validator: (_, v) =>
-                  v ? Promise.resolve() : Promise.reject(new Error("Please accept Terms & Privacy")),
+                validator: (_, value) =>
+                  value
+                    ? Promise.resolve()
+                    : Promise.reject(
+                        new Error("You must accept the terms and conditions")
+                      ),
               },
             ]}
           >
             <Checkbox>
-              I agree to the <Link to="/terms" className="link">Terms</Link> and{" "}
-              <Link to="/privacy" className="link">Privacy Policy</Link>.
+              I have read and agree to the Terms and Conditions.
             </Checkbox>
           </Form.Item>
 

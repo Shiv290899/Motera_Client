@@ -4,6 +4,7 @@ import { Link, useNavigate, useLocation } from "react-router-dom";
 //import { useDispatch } from "react-redux";
 import "./auth.css";
 import { LoginUser, GetCurrentUser, RequestPasswordReset, ResetPassword } from "../apiCalls/users";
+import { getOwnerOrgName } from "../utils/ownerConfig";
 //import { setUser } from "../redux/userSlice";
 
 function Login() {
@@ -189,7 +190,7 @@ function Login() {
   return (
     <div className="auth-container">
       <div className="auth-box">
-        <h1 className="title">Login to Shantha Motors</h1>
+        <h1 className="title">Login to {getOwnerOrgName() || "Motera"}</h1>
         <Form layout="vertical" form={form} onFinish={onFinish}>
           <Form.Item
             label="Email"
@@ -238,7 +239,7 @@ function Login() {
         {resetStage === "request" ? (
           <>
             <p style={{ marginBottom: 16 }}>
-              Enter the email you use for Shantha Motors. If we find a matching account, we'll send instructions to reset your password.
+              Enter the email you use for {getOwnerOrgName() || "Motera"}. If we find a matching account, we'll send instructions to reset your password.
             </p>
             <Form
               form={resetRequestForm}

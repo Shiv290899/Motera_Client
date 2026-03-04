@@ -1,4 +1,5 @@
 import React from "react";
+import { getOwnerOrgName, toRenderableImageUrl, toGoogleImageFallbackUrl } from "../utils/ownerConfig";
 import { Link, useLocation, useNavigate } from "react-router-dom"; // <-- added useNavigate
 // ^ We import useNavigate to programmatically redirect after sign-out.
 //   Link/location are already used for routing and active styling.
@@ -49,7 +50,7 @@ export default function Navbar() {
   };
   // ^ Keeps your original hook, so it’s a drop-in.
 
-  const { isMobile } = useScreen(); // read current breakpoint
+  const { isMobile, isDesktop } = useScreen(); // read current breakpoint
   // Mobile drawer state
   const [menuOpen, setMenuOpen] = React.useState(false);
   // For active route styles
@@ -82,21 +83,10 @@ export default function Navbar() {
 
   // --- Lightweight auth helpers (read from localStorage or JWT) ---
   const getCurrentUser = React.useCallback(() => {
-    // 1) Try a saved user object (recommended)
     const raw = localStorage.getItem("user");
     if (raw) {
-      try {
-        const u = JSON.parse(raw);
-        return {
-          name: u?.name || "",
-          email: u?.email || "",
-          role: u?.role || "",
-        };
-      } catch {
-        // ignore parse errors and fall back to token
-      }
+      try { return JSON.parse(raw); } catch { /* ignore */ }
     }
-    // 2) Fallback: decode the JWT payload (if app stores claims in token)
     const token = localStorage.getItem("token");
     const payload = parseJwt(token);
     if (payload) {
@@ -106,16 +96,17 @@ export default function Navbar() {
         role: payload?.role || "",
       };
     }
-    // 3) Not logged in
     return null;
   }, []);
   // ^ Centralized way to read current user info.
 
   const [user, setUser] = React.useState(() => getCurrentUser());
   // Logo fallbacks to avoid repeated failing requests
-  const [logoSrc, setLogoSrc] = React.useState('/shantha-logo.jpg');
-  const [logoSmallSrc, setLogoSmallSrc] = React.useState('/shantha-logo.jpg');
+  const [logoSrc, setLogoSrc] = React.useState('/motera-logo.jpg');
+  const [logoSmallSrc, setLogoSmallSrc] = React.useState('/motera-logo.jpg');
+  const logoTriedRef = React.useRef(new Set());
   // ^ Holds the current user object or null when logged out.
+  const orgName = getOwnerOrgName() || "Motera";
 
   // Keep user state in sync when localStorage changes (e.g., in other tabs)
   React.useEffect(() => {
@@ -133,6 +124,18 @@ export default function Navbar() {
   React.useEffect(() => {
     setUser(getCurrentUser());
   }, [location.pathname, getCurrentUser]);
+  // Apply owner logo if configured
+  React.useEffect(() => {
+    const url = toRenderableImageUrl(user?.ownerConfig?.logoUrl);
+    logoTriedRef.current = new Set();
+    if (url) {
+      setLogoSrc(url);
+      setLogoSmallSrc(url);
+    } else {
+      setLogoSrc("/motera-logo.jpg");
+      setLogoSmallSrc("/motera-logo.jpg");
+    }
+  }, [user]);
 
   // Simple avatar initial (first char of name/email)
   const avatarInitial = React.useMemo(() => {
@@ -212,8 +215,8 @@ export default function Navbar() {
     },
     // sticky, blurred header
     headerWrap: {
-      position: "sticky",
-      top: 0,
+      position: isDesktop ? "sticky" : "static",
+      top: isDesktop ? 0 : "auto",
       zIndex: 60,
       backdropFilter: "saturate(140%) blur(10px)",
       WebkitBackdropFilter: "saturate(140%) blur(10px)",
@@ -229,7 +232,7 @@ export default function Navbar() {
     // left: logo + wordmark
     logoWrap: { display: "flex", alignItems: "center", gap: 12 },
     logoImg: { height: isMobile ? 36 : 44, width: "auto", objectFit: "contain" },
-    brandTitle: { fontSize: isMobile ? 18 : 20, fontWeight: 800, color: T.ink },
+    brandTitle: { fontSize: isMobile ? 18 : 20, fontWeight: 800, color: T.ink, fontFamily: '"Cinzel", "Playfair Display", "Times New Roman", serif', letterSpacing: 0.6 },
     tagline: { fontSize: 12, color: T.mute, marginTop: 2 },
 
     // center/right: nav links (desktop/tablet)
@@ -411,9 +414,7 @@ export default function Navbar() {
         <div style={styles.container}>
           {/* Contact + Hours */}
           <div style={styles.phoneRow}>
-            <div style={styles.topbarText}>
-              📞 Sales: <strong>9731366921 / 8073283502</strong>
-            </div>
+            <div style={styles.topbarText}>{orgName}</div>
             <div style={styles.hours}>
               ⏰ Mon–Sat: 9:00 AM – 8:30 PM • Sun: 9:00 AM – 2:30 PM
             </div>
@@ -429,16 +430,23 @@ export default function Navbar() {
             <div style={styles.logoWrap}>
               <img
                 src={logoSrc}
-                alt="Shantha Motors Logo"
+                alt={`${orgName} Logo`}
                 style={styles.logoImg}
                 onError={(e) => {
-                  // graceful fallback if logo missing; prevent loops
+                  const failed = String(e.currentTarget.currentSrc || e.currentTarget.src || "");
+                  if (failed) logoTriedRef.current.add(failed);
+                  const next = toGoogleImageFallbackUrl(failed || logoSrc);
+                  if (next && !logoTriedRef.current.has(next)) {
+                    setLogoSrc(next);
+                    setLogoSmallSrc(next);
+                    return;
+                  }
                   e.currentTarget.onerror = null;
-                  setLogoSrc('https://via.placeholder.com/200x48?text=Shantha+Motors');
+                  setLogoSrc(`https://via.placeholder.com/200x48?text=${encodeURIComponent(orgName)}`);
                 }}
               />
               <div>
-                <div style={styles.brandTitle}>Shantha Motors</div>
+                <div style={styles.brandTitle}>{orgName}</div>
                 <div style={styles.tagline}>The Power of Trust</div>
               </div>
             </div>
@@ -556,6 +564,23 @@ export default function Navbar() {
                         >
                           My Profile
                         </span>
+                        {String(user?.role || "").toLowerCase() === "owner" && (
+                          <span
+                            style={styles.accItem}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => { setAccOpen(false); navigate("/profile"); }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                setAccOpen(false);
+                                navigate("/profile");
+                              }
+                            }}
+                          >
+                            Edit Profile
+                          </span>
+                        )}
+                        
                        
                        
                         <button
@@ -614,9 +639,17 @@ export default function Navbar() {
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <img
               src={logoSmallSrc}
-              alt="Shantha Motors Logo"
+              alt={`${orgName} Logo`}
               style={{ height: 28, width: "auto" }}
               onError={(e) => {
+                const failed = String(e.currentTarget.currentSrc || e.currentTarget.src || "");
+                if (failed) logoTriedRef.current.add(failed);
+                const next = toGoogleImageFallbackUrl(failed || logoSmallSrc);
+                if (next && !logoTriedRef.current.has(next)) {
+                  setLogoSrc(next);
+                  setLogoSmallSrc(next);
+                  return;
+                }
                 e.currentTarget.onerror = null;
                 setLogoSmallSrc('https://via.placeholder.com/120x28?text=SM');
               }}
@@ -695,6 +728,24 @@ export default function Navbar() {
               >
                 Profile
               </button>
+              {String(user?.role || "").toLowerCase() === "owner" && (
+                <button
+                  type="button"
+                  onClick={() => { navigate("/profile"); setMenuOpen(false); }}
+                  style={{ ...styles.drawerLink(false), width: "100%", textAlign: "left", background: "white", border: `1px solid ${T.line}`, cursor: "pointer" }}
+                >
+                  Edit Profile
+                </button>
+              )}
+              {String(user?.role || "").toLowerCase() === "owner" && (
+                <button
+                  type="button"
+                  onClick={() => { navigate("/staff"); setMenuOpen(false); }}
+                  style={{ ...styles.drawerLink(false), width: "100%", textAlign: "left", background: "white", border: `1px solid ${T.line}`, cursor: "pointer" }}
+                >
+                  Staff Dashboard
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => { onSignOut(); setMenuOpen(false); }}

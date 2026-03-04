@@ -1,18 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import dayjs from 'dayjs';
-import { Row, Col, Form, Input, Select, Radio, Button, message, Divider, Modal, Table, Space, Tag, Grid, Tooltip, Popconfirm, Alert } from "antd";
+import { Row, Col, Form, Input, Select, AutoComplete, Radio, Button, message, Divider, Modal, Table, Space, Tag, Grid, Tooltip, Popconfirm, Alert } from "antd";
 // Stock updates now use MongoDB backend only
 import { listStocks, listCurrentStocks, createStock, updateStock, listPendingTransfers, admitTransfer, rejectTransfer } from "../apiCalls/stocks";
 import BookingForm from "./BookingForm";
 import { listBranches, listBranchesPublic } from "../apiCalls/branches";
 import { exportToCsv } from "../utils/csvExport";
+import { resolveUnifiedGasUrl } from "../utils/ownerConfig";
 
 // --- Config ---
-// Vehicle catalog CSV remains (read-only) for dropdowns
-const CATALOG_CSV_URL = import.meta.env.VITE_VEHICLE_SHEET_CSV_URL ||
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vQYGuNPY_2ivfS7MTX4bWiu1DWdF2mrHSCnmTznZVEHxNmsrgcGWjVZN4UDUTOzQQdXTnbeM-ylCJbB/pub?gid=408799621&single=true&output=csv";
+const CATALOG_GAS_URL = resolveUnifiedGasUrl(
+  "catalog",
+  String(import.meta.env.VITE_VEHICLE_CATALOG_GAS_URL || "").trim()
+);
 
-// --- CSV loader ---
+// --- Catalog row normalizer ---
 const HEADERS = {
   company: ["Company", "Company Name"],
   model: ["Model", "Model Name"],
@@ -20,34 +22,20 @@ const HEADERS = {
   color: ["Color", "Colours", "Colors", "Colour", "Available Colors"],
 };
 
-const parseCsv = (text) => {
-  const rows = [];
-  let row = [], col = "", inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i], n = text[i + 1];
-    if (c === '"' && !inQuotes) { inQuotes = true; continue; }
-    if (c === '"' && inQuotes) { if (n === '"') { col += '"'; i++; continue; } inQuotes = false; continue; }
-    if (c === "," && !inQuotes) { row.push(col); col = ""; continue; }
-    if ((c === "\n" || c === "\r") && !inQuotes) { if (col !== "" || row.length) { row.push(col); rows.push(row); row = []; col = ""; } if (c === "\r" && n === "\n") i++; continue; }
-    col += c;
-  }
-  if (col !== "" || row.length) { row.push(col); rows.push(row); }
-  return rows;
+const appendQuery = (url, params = {}) => {
+  const q = new URLSearchParams(params).toString();
+  if (!q) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}${q}`;
 };
 
-const fetchSheetRowsCSV = async (url) => {
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error("Sheet fetch failed");
-  const csv = await res.text();
-  if (csv.trim().startsWith("<")) throw new Error("Expected CSV, got HTML");
-  const rows = parseCsv(csv);
-  if (!rows.length) return [];
-  const headers = rows[0].map((h) => (h || "").trim());
-  return rows.slice(1).map((r) => {
-    const obj = {};
-    headers.forEach((h, i) => (obj[h] = r[i] ?? ""));
-    return obj;
-  });
+const fetchCatalogRows = async () => {
+  if (!CATALOG_GAS_URL) throw new Error("Catalog GAS URL is missing");
+  const url = appendQuery(CATALOG_GAS_URL, { action: "list" });
+  const res = await fetch(url, { method: "GET", mode: "cors", credentials: "omit", cache: "no-store" });
+  if (!res.ok) throw new Error("Catalog fetch failed");
+  const resp = await res.json();
+  const data = resp?.data || resp?.items || resp?.rows || resp || [];
+  return Array.isArray(data) ? data : [];
 };
 
 const pick = (row, keys) => String(keys.map((k) => row[k] ?? "").find((v) => v !== "") || "").trim();
@@ -107,18 +95,6 @@ export default function StockUpdate() {
   const [actingTransferId, setActingTransferId] = useState(null);
   const [actingMode, setActingMode] = useState(null);
   const normalizeKey = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]/g, '');
-  const dealerOptions = useMemo(() => {
-    const name = String(company || '').toLowerCase();
-    if (!name) return [];
-    // Brand → franchise suggestions
-    if (/^hero$/i.test(company) || name.includes('hero')) {
-      return ['Poorna Motors', 'Sai Bikes', ];
-    }
-    if (/^honda$/i.test(company) || name.includes('honda')) {
-      return ['Silicon Honda', 'Springs Honda'];
-    }
-    return [];
-  }, [company]);
 
   const currentUser = useMemo(() => {
     try { return JSON.parse(localStorage.getItem('user') || 'null') } catch { return null }
@@ -159,7 +135,7 @@ export default function StockUpdate() {
   useEffect(() => {
     (async () => {
       try {
-        const raw = await fetchSheetRowsCSV(CATALOG_CSV_URL);
+        const raw = await fetchCatalogRows();
         const cleaned = raw
           .map(normalizeCatalogRow)
           .filter((r) => r.company && r.model && r.variant);
@@ -206,8 +182,14 @@ export default function StockUpdate() {
   }, [cacheKey]);
 
   const companies = useMemo(() => [...new Set(catalog.map((r) => r.company))], [catalog]);
-  const models = useMemo(() => [...new Set(catalog.filter((r) => r.company === company).map((r) => r.model))], [catalog, company]);
-  const variants = useMemo(() => [...new Set(catalog.filter((r) => r.company === company && r.model === model).map((r) => r.variant))], [catalog, company, model]);
+  const models = useMemo(
+    () => [...new Set(catalog.filter((r) => normalizeKey(r.company) === normalizeKey(company)).map((r) => r.model))],
+    [catalog, company, normalizeKey]
+  );
+  const variants = useMemo(
+    () => [...new Set(catalog.filter((r) => normalizeKey(r.company) === normalizeKey(company) && normalizeKey(r.model) === normalizeKey(model)).map((r) => r.variant))],
+    [catalog, company, model, normalizeKey]
+  );
   // Preset color choices with hex samples for quick pick
   // Updated per requirement to use the following 19 colors
   const PRESET_COLORS = useMemo(() => ([
@@ -234,7 +216,11 @@ export default function StockUpdate() {
 
   const catalogColors = useMemo(() => {
     const dyn = catalog
-      .filter((r) => r.company === company && r.model === model && r.variant === variant)
+      .filter((r) =>
+        normalizeKey(r.company) === normalizeKey(company) &&
+        normalizeKey(r.model) === normalizeKey(model) &&
+        normalizeKey(r.variant) === normalizeKey(variant)
+      )
       .flatMap((r) => splitColors(r.color));
     const map = new Map();
     dyn.forEach((c) => {
@@ -254,9 +240,24 @@ export default function StockUpdate() {
     return { bg: m?.hex || '#d1d5db', border: m?.border || '#d1d5db' };
   };
 
-  const onCompany = (v) => { setCompany(v); setModel(""); setVariant(""); form.setFieldsValue({ model: undefined, variant: undefined, color: undefined }); };
-  const onModel = (v) => { setModel(v); setVariant(""); form.setFieldsValue({ variant: undefined, color: undefined }); };
-  const onVariant = (v) => { setVariant(v); form.setFieldsValue({ color: undefined }); };
+  const onCompany = (v) => {
+    const next = String(v || "").trim();
+    setCompany(next);
+    setModel("");
+    setVariant("");
+    form.setFieldsValue({ company: next || undefined, model: undefined, variant: undefined, color: undefined });
+  };
+  const onModel = (v) => {
+    const next = String(v || "").trim();
+    setModel(next);
+    setVariant("");
+    form.setFieldsValue({ model: next || undefined, variant: undefined, color: undefined });
+  };
+  const onVariant = (v) => {
+    const next = String(v || "").trim();
+    setVariant(next);
+    form.setFieldsValue({ variant: next || undefined, color: undefined });
+  };
 
   const fetchPendingTransfers = useCallback(async () => {
     setLoadingPending(true);
@@ -290,63 +291,103 @@ export default function StockUpdate() {
   }, [pendingBranch]);
 
   const onSubmit = async () => {
-    let success = false;
     try {
       setFormError("");
       const values = await form.validateFields();
       setSubmitting(true);
       const user = (() => { try { return JSON.parse(localStorage.getItem('user')||'null') } catch { return null } })();
+      const editingId = editingMovementId;
+      const actionNow = action;
       const row = {
         Chassis_No: String(values.chassis || '').toUpperCase(),
         Company: values.company || '',
         Model: values.model || '',
         Variant: values.variant || '',
         Color: values.color || '',
-        Action: action,
-        Target_Branch: action === 'transfer' ? (values.targetBranch || '') : '',
-        Return_To: action === 'return' ? (values.returnTo || '') : '',
-        Customer_Name: action === 'invoice' ? (values.customerName || '') : '',
+        Action: actionNow,
+        Target_Branch: actionNow === 'transfer' ? (values.targetBranch || '') : '',
+        Return_To: actionNow === 'return' ? (values.returnTo || '') : '',
+        Customer_Name: actionNow === 'invoice' ? (values.customerName || '') : '',
         Source_Branch: values.sourceBranch || '',
-        Notes: (() => {
-          const base = String(values.notes || '').trim();
-          const fr = action === 'add' ? String(values.franchise || '').trim() : '';
-          if (fr) return base ? `${base} | Franchise: ${fr}` : `Franchise: ${fr}`;
-          return base;
-        })(),
+        Notes: String(values.notes || '').trim(),
       };
-      if (editingMovementId) {
-        const resp = await updateStock(editingMovementId, row);
-        success = !!(resp?.success ?? resp?.ok);
-        if (success) {
-          message.success("Stock movement updated.");
-          setFormError("");
-        } else {
-          const errMsg = resp?.message || "Update failed";
-          setFormError(errMsg);
-          message.error(errMsg);
+      let rollbackItems = null;
+      const tempId = `tmp-${Date.now()}`;
+      const nowIso = new Date().toISOString();
+      const optimisticRow = {
+        key: editingId || tempId,
+        ts: nowIso,
+        chassis: row.Chassis_No,
+        company: row.Company,
+        model: row.Model,
+        variant: row.Variant,
+        color: row.Color,
+        action: row.Action,
+        targetBranch: row.Target_Branch,
+        returnTo: row.Return_To,
+        customerName: row.Customer_Name,
+        sourceBranch: row.Source_Branch,
+        lastSourceBranch: row.Source_Branch,
+        notes: row.Notes,
+        movementId: editingId || tempId,
+        transferStatus: actionNow === 'transfer' ? 'pending' : '',
+        resolvedByName: '',
+        resolvedAt: '',
+      };
+      setItems((prev) => {
+        rollbackItems = prev;
+        if (editingId) {
+          return prev.map((it) => it.movementId === editingId ? { ...it, ...optimisticRow, movementId: editingId, key: editingId } : it);
         }
-      } else {
-        const resp = await createStock({ data: row, createdBy: user?.name || user?.email || 'user' });
-        success = !!(resp?.success ?? resp?.ok);
-        if (success) {
-          const msg = action === 'transfer'
-            ? 'Transfer recorded and waiting for admit by the target branch.'
-            : 'Stock movement saved.';
-          message.success(msg);
-          setFormError("");
-        } else {
-          const errMsg = resp?.message || "Save failed";
-          setFormError(errMsg);
-          message.error(errMsg);
-        }
-      }
-      if (!success) return;
-      form.resetFields(["chassis", "notes", "targetBranch", "returnTo", "customerName", "franchise"]);
+        return [optimisticRow, ...prev];
+      });
+
+      // Close immediately so spinner is not visible while network call runs.
       setModalOpen(false);
+      form.resetFields(["chassis", "notes", "targetBranch", "returnTo", "customerName"]);
       setEditingMovementId(null);
       setAllowedActions(null);
-      fetchList();
-      if (action === 'transfer') fetchPendingTransfers();
+      setSubmitting(false);
+
+      void (async () => {
+        try {
+          let resp;
+          if (editingId) {
+            resp = await updateStock(editingId, row);
+            if (!(resp?.success ?? resp?.ok)) throw new Error(resp?.message || 'Update failed');
+            message.success("Stock movement updated.");
+          } else {
+            resp = await createStock({ data: row, createdBy: user?.name || user?.email || 'user' });
+            if (!(resp?.success ?? resp?.ok)) throw new Error(resp?.message || 'Save failed');
+            const saved = resp?.data || {};
+            const savedMovementId = String(saved?.movementId || saved?._id || '').trim();
+            if (savedMovementId) {
+              setItems((prev) => prev.map((it) => (
+                it.movementId === tempId
+                  ? {
+                      ...it,
+                      movementId: savedMovementId,
+                      key: savedMovementId,
+                      ts: pickTs(saved) || it.ts,
+                      transferStatus: String(saved?.transferStatus || it.transferStatus || ''),
+                    }
+                  : it
+              )));
+            }
+            const msg = actionNow === 'transfer'
+              ? 'Transfer recorded and waiting for admit by the target branch.'
+              : 'Stock movement saved.';
+            message.success(msg);
+          }
+          fetchList();
+          if (actionNow === 'transfer') fetchPendingTransfers();
+        } catch (err) {
+          if (rollbackItems) setItems(rollbackItems);
+          const apiMessage = err?.response?.data?.message || err?.message || "Failed to save. Check configuration or network.";
+          setFormError(apiMessage);
+          message.error(apiMessage);
+        }
+      })();
     } catch (err) {
       if (err?.errorFields) return; // antd validation
       const apiMessage = err?.response?.data?.message || err?.message;
@@ -375,10 +416,42 @@ export default function StockUpdate() {
     try {
       // For staff-like roles, show current inventory only (latest per chassis)
       const branchParam = isStaffLike ? myBranch : (branchFilter === 'all' ? undefined : branchFilter);
-      const resp = isStaffLike
-        ? await listCurrentStocks({ branch: branchParam })
-        : await listStocks({ branch: branchParam, mode: undefined });
-        const list = Array.isArray(resp?.data) ? resp.data : [];
+      const fetchAllPages = async (fetchFn) => {
+        const perPage = 5000;
+        const maxPages = 40;
+        const merged = [];
+        const seen = new Set();
+        let pageNo = 1;
+        let expectedTotal = null;
+
+        while (pageNo <= maxPages) {
+          const resp = await fetchFn({ limit: perPage, page: pageNo });
+          const list = Array.isArray(resp?.data) ? resp.data : [];
+          const total = Number(resp?.total);
+          if (Number.isFinite(total) && total > 0) expectedTotal = total;
+          if (!list.length) break;
+
+          let added = 0;
+          list.forEach((row) => {
+            const key = String(row?.movementId || row?._id || "").trim() || JSON.stringify(row);
+            if (seen.has(key)) return;
+            seen.add(key);
+            merged.push(row);
+            added += 1;
+          });
+
+          if (added === 0) break;
+          if (expectedTotal && merged.length >= expectedTotal) break;
+          if (list.length < 500) break; // server appears to cap each page at 500
+          pageNo += 1;
+        }
+
+        return merged;
+      };
+
+      const list = isStaffLike
+        ? await fetchAllPages(({ limit, page }) => listCurrentStocks({ branch: branchParam, limit, page }))
+        : await fetchAllPages(({ limit, page }) => listStocks({ branch: branchParam, mode: undefined, limit, page }));
         const rows = list.map((r, idx) => {
           // Infer action when backend snapshot doesn't carry it (common in current stock view)
           const status = String(r.status || '').toLowerCase();
@@ -904,37 +977,67 @@ export default function StockUpdate() {
 
             <Col span={24}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-                <div style={{ fontWeight: 700 }}>Vehicle Details (from CSV)</div>
-                <div style={{ fontSize: 12, color: sheetOk ? "#10b981" : "#ef4444" }}>{sheetOk ? "Catalog loaded" : "Catalog unavailable"}</div>
+                <div style={{ fontWeight: 700 }}>Vehicle Details (from Owner Catalog)</div>
+                <div style={{ fontSize: 12, color: sheetOk ? "#10b981" : "#ef4444" }}>{sheetOk ? "Catalog loaded" : "Catalog unavailable (check Owner Webhook URL)"}</div>
               </div>
             </Col>
 
             <Col xs={24} md={12}>
               <Form.Item name="company" label={label("Company")} rules={isVehicleLocked ? [] : [{ required: true, message: "Company is required" }]}> 
-                <Select placeholder={sheetOk ? "Select company" : "Sheet unavailable"} disabled={!sheetOk || isVehicleLocked} onChange={onCompany} showSearch optionFilterProp="children">
-                  {companies.map((c) => <Select.Option key={c} value={c}>{c}</Select.Option>)}
-                </Select>
+                <AutoComplete
+                  options={companies.map((c) => ({ value: c }))}
+                  placeholder={sheetOk ? "Type/select company" : "Type company"}
+                  disabled={isVehicleLocked}
+                  onChange={onCompany}
+                  filterOption={(input, option) =>
+                    String(option?.value || "")
+                      .toLowerCase()
+                      .includes(String(input || "").toLowerCase())
+                  }
+                >
+                  <Input />
+                </AutoComplete>
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
               <Form.Item name="model" label={label("Model")} rules={isVehicleLocked ? [] : [{ required: true, message: "Model is required" }]}> 
-                <Select placeholder="Select model" disabled={!sheetOk || !company || isVehicleLocked} onChange={onModel} showSearch optionFilterProp="children">
-                  {models.map((m) => <Select.Option key={m} value={m}>{m}</Select.Option>)}
-                </Select>
+                <AutoComplete
+                  options={models.map((m) => ({ value: m }))}
+                  placeholder="Type/select model"
+                  disabled={isVehicleLocked}
+                  onChange={onModel}
+                  filterOption={(input, option) =>
+                    String(option?.value || "")
+                      .toLowerCase()
+                      .includes(String(input || "").toLowerCase())
+                  }
+                >
+                  <Input />
+                </AutoComplete>
               </Form.Item>
             </Col>
 
             <Col xs={24} md={12}>
               <Form.Item name="variant" label={label("Variant")} rules={isVehicleLocked ? [] : [{ required: true, message: "Variant is required" }]}> 
-                <Select placeholder="Select variant" disabled={!sheetOk || !model || isVehicleLocked} onChange={onVariant} showSearch optionFilterProp="children">
-                  {variants.map((v) => <Select.Option key={v} value={v}>{v}</Select.Option>)}
-                </Select>
+                <AutoComplete
+                  options={variants.map((v) => ({ value: v }))}
+                  placeholder="Type/select variant"
+                  disabled={isVehicleLocked}
+                  onChange={onVariant}
+                  filterOption={(input, option) =>
+                    String(option?.value || "")
+                      .toLowerCase()
+                      .includes(String(input || "").toLowerCase())
+                  }
+                >
+                  <Input />
+                </AutoComplete>
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
               <Form.Item name="color" label={label("Color")} rules={isVehicleLocked ? [] : [{ required: true, message: "Color is required" }]}> 
                 {colors.filter(Boolean).length ? (
-                  <Select placeholder="Select color" disabled={!sheetOk || !variant || isVehicleLocked} showSearch optionFilterProp="children">
+                  <Select placeholder="Select color" disabled={!variant || isVehicleLocked} showSearch optionFilterProp="children">
                     {colors.filter(Boolean).map((c) => {
                       const s = swatch(c);
                       return (
@@ -1010,19 +1113,6 @@ export default function StockUpdate() {
                 />
               </Form.Item>
             </Col>
-
-            {/* Franchise selector (only when adding new stock and when brand has known dealers) */}
-            {action === 'add' && dealerOptions.length > 0 && (
-              <Col xs={24} md={12}>
-                <Form.Item name="franchise" label={label("Franchise (Dealer)")}> 
-                  <Select placeholder="Select franchise" allowClear disabled={!company} showSearch optionFilterProp="children">
-                    {dealerOptions.map((d)=> (
-                      <Select.Option key={`fr:${d}`} value={d}>{d}</Select.Option>
-                    ))}
-                  </Select>
-                </Form.Item>
-              </Col>
-            )}
 
             <Col span={24}>
               {Array.isArray(allowedActions) && allowedActions.length === 1 ? (

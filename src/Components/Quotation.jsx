@@ -2,20 +2,57 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import dayjs from "dayjs";
 import {
-  Row, Col, Form, Input, InputNumber, Select, Button, Radio, message, Checkbox, Divider, DatePicker, Switch, List, Modal, Spin
+  Row, Col, Form, Input, InputNumber, Select, AutoComplete, Button, Radio, message, Checkbox, Divider, DatePicker, Switch, Modal, Spin
 } from "antd";
-import { PrinterOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
+import {
+  PrinterOutlined,
+  PlusOutlined,
+  DeleteOutlined,
+  ReloadOutlined,
+  EyeOutlined,
+} from "@ant-design/icons";
 import FetchQuot from "./FetchQuot"; // for fetching saved quotations
 import { GetCurrentUser } from "../apiCalls/users";
 import { getBranch, listBranchesPublic } from "../apiCalls/branches";
 import { listUsersPublic } from "../apiCalls/adminUsers";
 import { normalizeKey, uniqCaseInsensitive } from "../utils/caseInsensitive";
 import { saveBookingViaWebhook, reserveQuotationSerial } from "../apiCalls/forms";
+import {
+  getOwnerOrgName,
+  getOwnerOrgNameRegional,
+  getOwnerOrgNameFontFamily,
+  getOwnerOrgNameRegionalFontFamily,
+  getOwnerOrgNameFontWeight,
+  getOwnerOrgNameRegionalFontWeight,
+  getOwnerOrgNameFontSizePt,
+  getOwnerOrgNameRegionalFontSizePt,
+  getOwnerOrgNameFontColor,
+  getOwnerOrgAddress,
+  getOwnerOrgAddressFontWeight,
+  getOwnerOrgAddressFontSizePt,
+  getOwnerOrgMobiles,
+  getOwnerLogoUrl,
+  getOwnerLocationQrUrl,
+  getOwnerFreeFittingsConfig,
+  getOwnerConfig,
+  getOwnerQuotationWhatsAppTemplate,
+  applyTemplatePlaceholders,
+  resolveUnifiedGasUrl,
+} from "../utils/ownerConfig";
 // GAS webhook for Quotation save/search/nextSerial
 // Default set in code so it works even without env var
 const DEFAULT_QUOT_GAS_URL =
-  "https://script.google.com/macros/s/AKfycby0YV2E2Ryb4YehYRzBistMW4sWN3XDcqaEfgkfRvEjmaKNVKq2Ubi3ul50AbxO6TVPJA/exec";
-const QUOT_GAS_URL = import.meta.env.VITE_QUOTATION_GAS_URL || DEFAULT_QUOT_GAS_URL;
+  "https://script.google.com/macros/s/AKfycbwd-hKTwEfAretqEn7c_jIqNgheFgDaSVjCO3wHHQxgXQbbd8grLr8tUaRyLoAJWe4O/exec?module=quotation";
+const getQuotationGasUrl = () =>
+  resolveUnifiedGasUrl('quotation', import.meta.env.VITE_QUOTATION_GAS_URL || DEFAULT_QUOT_GAS_URL);
+
+const DEFAULT_VEHICLE_CATALOG_GAS_URL =
+  "https://script.google.com/macros/s/AKfycbz_DoNoD0XTx3RNMOSZfypbMqWVN4yTy3ct96aE4LhJ9yb_YvKr0GRbO_GA3Fgkwptb/exec?module=vehiclecatalog";
+const getVehicleCatalogGasUrl = () =>
+  resolveUnifiedGasUrl(
+    'vehiclecatalog',
+    import.meta.env.VITE_VEHICLE_CATALOG_GAS_URL || DEFAULT_VEHICLE_CATALOG_GAS_URL
+  );
 
 
 /* ======================
@@ -88,25 +125,8 @@ const normalizeSheetRow = (row = {}) => ({
 /* ======================
    CONFIG + STATIC OPTIONS
    ====================== */
-const PROCESSING_FEE = 8000;
-const RATE_LOW = 9;
-const RATE_HIGH = 11;
-
-const EXECUTIVES = [
-  { name: "Rukmini", phone: "9901678562" },
-  { name: "Meghana", phone: "9741609799" },
-  { name: "Shubha", phone: "8971585057" },
-  { name: "Rani", phone: "9108970455" },
-  { name: "Likhitha", phone: "9535190015" },
-  { name: "Vanitha", phone: "9380729861" },
-  { name: "Prakash", phone: "9740176476" },
-  { name: "Swathi", phone: "6363116317" },
-  { name: "Kumar", phone: "7975807667" },
-  { name: "Sujay", phone: "7022878048" },
-  { name: "Kavi", phone: "9108970455" },
-  { name: "Narasimha", phone: "9900887666" },
-  { name: "Kavya", phone: "8073165374" },
-];
+const DEFAULT_PROCESSING_FEE = 8000;
+const DEFAULT_FLAT_RATE = 11;
 
 
 /* ======================
@@ -158,6 +178,10 @@ const DOCS_REQUIRED = [
   "Local Address Proof",
 ];
 
+const sameStringArray = (a = [], b = []) => (
+  a.length === b.length && a.every((v, i) => v === b[i])
+);
+
 const MEGHANA_NAME = "Meghana";
 const BRANCH_NAME = "Byadarahalli";
 
@@ -177,13 +201,13 @@ const inr0 = (n) =>
   }).format(Math.max(0, Math.round(n || 0)));
 
 // Save via Apps Script Web App (proxied through backend to avoid CORS)
-const submitToWebhook = async (data) => {
+const submitToWebhook = async (data, webhookUrl) => {
   // Optional integration: if URL isn’t configured, treat as offline success.
-  if (!QUOT_GAS_URL) {
+  if (!webhookUrl) {
     return { success: true, offline: true };
   }
   const resp = await saveBookingViaWebhook({
-    webhookUrl: QUOT_GAS_URL,
+    webhookUrl,
     method: "POST",
     payload: { action: "save", data },
   });
@@ -203,6 +227,7 @@ const makeEmptyVehicle = () => ({
   downPayment: 0,
   emiSet: "12",
 });
+const DEFAULT_QUOTATION_ADDRESS = "BANGLORE";
 
 /* ======================
    CORE MANDATORY VALIDATION
@@ -212,6 +237,7 @@ const CORE_KEYS = [
   "executive",
   "name",
   "mobile",
+  "address",
   "company",
   "bikeModel",
   "variant",
@@ -238,13 +264,54 @@ const validateCore = async (form) => {
   return values;
 };
 
+const readOwnerBranding = () => ({
+  orgName: getOwnerOrgName() || "Motera",
+  orgNameRegional: getOwnerOrgNameRegional(),
+  orgNameFontFamily: getOwnerOrgNameFontFamily(),
+  orgNameRegionalFontFamily: getOwnerOrgNameRegionalFontFamily(),
+  orgNameFontWeight: getOwnerOrgNameFontWeight(),
+  orgNameRegionalFontWeight: getOwnerOrgNameRegionalFontWeight(),
+  orgNameFontSizePt: getOwnerOrgNameFontSizePt(),
+  orgNameRegionalFontSizePt: getOwnerOrgNameRegionalFontSizePt(),
+  orgNameFontColor: getOwnerOrgNameFontColor(),
+  orgAddress: getOwnerOrgAddress() || "",
+  orgAddressFontWeight: getOwnerOrgAddressFontWeight(),
+  orgAddressFontSizePt: getOwnerOrgAddressFontSizePt(),
+  orgMobiles: getOwnerOrgMobiles(),
+  orgLogoUrl: getOwnerLogoUrl() || "",
+  orgLocationQrUrl: getOwnerLocationQrUrl() || "/location-qr.png",
+  freeFittingsConfig: getOwnerFreeFittingsConfig(),
+});
+
 /* ======================
    COMPONENT
    ====================== */
 export default function Quotation() {
+  const QUOT_GAS_URL = getQuotationGasUrl();
+  const VEHICLE_CATALOG_GAS_URL = getVehicleCatalogGasUrl();
+  const [ownerBranding, setOwnerBranding] = useState(() => readOwnerBranding());
+  const refreshOwnerBranding = React.useCallback(() => {
+    setOwnerBranding(readOwnerBranding());
+  }, []);
+  const {
+    orgName: ORG_NAME,
+    orgNameRegional: ORG_NAME_REGIONAL,
+    orgNameFontFamily: ORG_NAME_FONT_FAMILY,
+    orgNameRegionalFontFamily: ORG_NAME_REGIONAL_FONT_FAMILY,
+    orgNameFontWeight: ORG_NAME_FONT_WEIGHT,
+    orgNameRegionalFontWeight: ORG_NAME_REGIONAL_FONT_WEIGHT,
+    orgNameFontSizePt: ORG_NAME_FONT_SIZE_PT,
+    orgNameRegionalFontSizePt: ORG_NAME_REGIONAL_FONT_SIZE_PT,
+    orgNameFontColor: ORG_NAME_FONT_COLOR,
+    orgAddress: ORG_ADDR,
+    orgAddressFontWeight: ORG_ADDR_FONT_WEIGHT,
+    orgAddressFontSizePt: ORG_ADDR_FONT_SIZE_PT,
+    orgMobiles: ORG_MOBILES,
+    orgLogoUrl: ORG_LOGO_URL,
+    orgLocationQrUrl: ORG_LOCATION_QR_URL,
+    freeFittingsConfig: OWNER_FREE_FITTINGS_CONFIG,
+  } = ownerBranding;
   const [form] = Form.useForm();
-
-  const [brand, setBrand] = useState("SHANTHA"); // "SHANTHA" | "NH"
 
   const [bikeData, setBikeData] = useState([]);
   const [company, setCompany] = useState("");
@@ -275,7 +342,7 @@ export default function Quotation() {
   const [printing, setPrinting] = useState(false); // lock Print until window opens
   const savingRef = useRef(false);
   const [vehicleType, setVehicleType] = useState("scooter");
-  const [fittings, setFittings] = useState(["Side Stand", "Floor Mat", "ISI Helmet", "Grip Cover"]);
+  const [fittings, setFittings] = useState(() => OWNER_FREE_FITTINGS_CONFIG?.defaultSelected || []);
   const [docsReq, setDocsReq] = useState(DOCS_REQUIRED);
   const [extraVehicles, setExtraVehicles] = useState([]); // up to 3 records (V2..V4)
   const [userStaffName, setUserStaffName] = useState();
@@ -297,6 +364,37 @@ export default function Quotation() {
   const [pendingItems, setPendingItems] = useState([]);
   const [pendingLoaded, setPendingLoaded] = useState(false);
   const [pendingAutoApply, setPendingAutoApply] = useState(null);
+  const [loadedQuotationMeta, setLoadedQuotationMeta] = useState(null);
+
+  const ownerCfg = getOwnerConfig();
+  const processingFee = (() => {
+    const v = Number(ownerCfg?.processingFee);
+    return Number.isFinite(v) && v >= 0 ? v : DEFAULT_PROCESSING_FEE;
+  })();
+  const flatInterestRate = (() => {
+    const v = Number(ownerCfg?.flatInterestRate);
+    return Number.isFinite(v) && v >= 0 ? v : DEFAULT_FLAT_RATE;
+  })();
+  const configuredFittingsOptions = Array.isArray(OWNER_FREE_FITTINGS_CONFIG?.options)
+    ? OWNER_FREE_FITTINGS_CONFIG.options
+    : [];
+  const configuredFittingsDefaults = Array.isArray(OWNER_FREE_FITTINGS_CONFIG?.defaultSelected)
+    ? OWNER_FREE_FITTINGS_CONFIG.defaultSelected
+    : [];
+  const activeFittingsOptions = useMemo(
+    () => (configuredFittingsOptions.length
+      ? configuredFittingsOptions
+      : (vehicleType === "scooter" ? SCOOTER_OPTIONS : MOTORCYCLE_OPTIONS)),
+    [configuredFittingsOptions, vehicleType]
+  );
+  const activeFittingsDefaults = useMemo(
+    () => (configuredFittingsDefaults.length
+      ? configuredFittingsDefaults.filter((x) => activeFittingsOptions.includes(x))
+      : (vehicleType === "scooter"
+        ? ["Side Stand", "Floor Mat", "ISI Helmet", "Grip Cover"]
+        : ["Tank Cover", "Gripper", "Seat Cover", "ISI Helmet"])),
+    [configuredFittingsDefaults, activeFittingsOptions, vehicleType]
+  );
 
   // Outbox for optimistic background submission (local-only)
   const OUTBOX_KEY = 'Quotation:outbox';
@@ -338,7 +436,7 @@ export default function Quotation() {
     const target = norm(executiveName);
     if (!target) return "";
     const matchByName = (list) => (list || []).find((e) => norm(e?.name) === target);
-    const found = matchByName(execOptions) || matchByName(EXECUTIVES);
+    const found = matchByName(execOptions);
     if (found?.phone) return String(found.phone);
     try {
       const curUser = JSON.parse(localStorage.getItem('user') || 'null');
@@ -350,13 +448,15 @@ export default function Quotation() {
   // Restore defaults if branch/executive get cleared by a reset or fetch
   const watchedBranch = Form.useWatch('branch', form);
   const watchedExec = Form.useWatch('executive', form);
+  const watchedAddress = Form.useWatch('address', form);
   useEffect(() => {
     const patch = {};
     if (!watchedBranch && defaultBranchName) patch.branch = defaultBranchName;
     if (!watchedExec && defaultExecutiveName) patch.executive = defaultExecutiveName;
+    if (!watchedAddress) patch.address = DEFAULT_QUOTATION_ADDRESS;
     if (Object.keys(patch).length) form.setFieldsValue(patch);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watchedBranch, watchedExec, defaultBranchName, defaultExecutiveName]);
+  }, [watchedBranch, watchedExec, watchedAddress, defaultBranchName, defaultExecutiveName]);
 
   // ✅ antd message instance + helper to ensure popup shows before opening new tab/print
   const [msgApi, msgCtx] = message.useMessage();
@@ -377,6 +477,7 @@ export default function Quotation() {
   };
 
   useEffect(() => {
+    refreshOwnerBranding();
     (async () => {
       // Prefill executive + branch from logged-in user (staff)
       try {
@@ -391,14 +492,13 @@ export default function Quotation() {
           return null;
         };
         let user = readLocalUser();
-        if (!user || !user.formDefaults) {
-          const res = await GetCurrentUser().catch(() => null);
-          if (res?.success && res.data) {
-            user = res.data;
-            try { localStorage.setItem('user', JSON.stringify(user)); } catch {
-              //uhy
-            }
+        const fresh = await GetCurrentUser().catch(() => null);
+        if (fresh?.success && fresh.data) {
+          user = fresh.data;
+          try { localStorage.setItem('user', JSON.stringify(user)); } catch {
+            // ignore localStorage errors
           }
+          refreshOwnerBranding();
         }
         if (user) {
           const staffNameRaw = user?.formDefaults?.staffName || user?.name || undefined;
@@ -407,6 +507,14 @@ export default function Quotation() {
           // who can switch branches
           const can = Boolean(user?.canSwitchBranch) || ["owner","admin"].includes(String(role||'').toLowerCase());
           setCanSwitch(can);
+          // Load staff directory with phones for executive phone resolution.
+          try {
+            const users = await listUsersPublic({ role: 'staff', status: 'active', limit: 100000 });
+            if (users?.success && Array.isArray(users?.data?.items)) {
+              const items = users.data.items.map((u) => ({ name: u.name, phone: u.phone || '' }));
+              setExecOptions(items);
+            }
+          } catch { /* ignore */ }
           // Build allowed branch list
           try {
             const roleLc = String(role || '').toLowerCase();
@@ -422,14 +530,6 @@ export default function Quotation() {
                 }));
                 setAllowedBranches(all);
               }
-              // Also load staff list for Executive dropdown
-              try {
-                const users = await listUsersPublic({ role: 'staff', status: 'active', limit: 100000 });
-                if (users?.success && Array.isArray(users?.data?.items)) {
-                  const items = users.data.items.map((u) => ({ name: u.name, phone: u.phone || '' }));
-                  setExecOptions(items);
-                }
-              } catch { /* ignore */ }
             } else {
               // Staff: only own + additional branches
               const list = [];
@@ -491,12 +591,35 @@ export default function Quotation() {
         // ignore
       }
 
-      // Load vehicle catalog sheet
+      // Load vehicle catalog (owner web app URL preferred, fallback to CSV)
       try {
-        const raw = await fetchSheetRowsCSV(CATALOG_CSV_URL);
-        const cleaned = raw
-          .map(normalizeSheetRow)
-          .filter((r) => r.company && r.model && r.variant);
+        let cleaned = [];
+        if (VEHICLE_CATALOG_GAS_URL) {
+          try {
+            const resp = await saveBookingViaWebhook({
+              webhookUrl: VEHICLE_CATALOG_GAS_URL,
+              method: "GET",
+              payload: { action: "list" },
+            });
+            const js = resp?.data || resp;
+            const rows = Array.isArray(js?.rows)
+              ? js.rows
+              : Array.isArray(js?.data)
+              ? js.data
+              : Array.isArray(js)
+              ? js
+              : [];
+            cleaned = rows.map(normalizeSheetRow).filter((r) => r.company && r.model && r.variant);
+          } catch {
+            cleaned = [];
+          }
+        }
+
+        if (!cleaned.length) {
+          const raw = await fetchSheetRowsCSV(CATALOG_CSV_URL);
+          cleaned = raw.map(normalizeSheetRow).filter((r) => r.company && r.model && r.variant);
+        }
+
         if (!cleaned.length) {
           msgApi.warning("Sheet loaded but no valid rows. Switching to manual entry.");
           setManual(true);
@@ -512,7 +635,20 @@ export default function Quotation() {
         setSheetOk(false);
       }
     })();
-  }, [msgApi]);
+  }, [msgApi, refreshOwnerBranding]);
+
+  useEffect(() => {
+    const onFocus = () => refreshOwnerBranding();
+    const onStorage = (e) => {
+      if (!e || e.key === "user") refreshOwnerBranding();
+    };
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [refreshOwnerBranding]);
 
   // Removed serial prefetch to avoid accidental increments on refresh
 
@@ -542,10 +678,8 @@ export default function Quotation() {
     () => watchedBranch || defaultBranchName || '',
     [watchedBranch, defaultBranchName]
   );
-  const pendingBranchReady = useMemo(
-    () => Boolean(String(pendingBranch || '').trim()),
-    [pendingBranch]
-  );
+  const isOwnerAdmin = ["owner", "admin", "superadmin"].includes(String(userRole || "").toLowerCase());
+  
   const pendingCount = pendingLoaded ? pendingItems.length : null;
 
   const normalizePendingRow = (row) => {
@@ -585,6 +719,26 @@ export default function Quotation() {
       const d = dayjs(followUpAtRaw, ["DD-MM-YYYY HH:mm","DD/MM/YYYY HH:mm","DD-MM-YYYY","DD/MM/YYYY", dayjs.ISO_8601], true);
       return d.isValid() ? d.format('DD-MM-YYYY HH:mm') : String(followUpAtRaw);
     })();
+    const followUpUpdatedAtRaw =
+      followUp.updatedAt ||
+      values['Follow-up Updated At'] ||
+      values['Follow Up Updated At'] ||
+      values['Followup Updated At'] ||
+      values['Updated At'] ||
+      values.updatedAt ||
+      payload.updatedAt ||
+      values['Saved At'] ||
+      values.savedAt ||
+      '';
+    const followUpUpdatedAt = (() => {
+      if (!followUpUpdatedAtRaw) return '';
+      const d = dayjs(
+        followUpUpdatedAtRaw,
+        ["DD-MM-YYYY HH:mm", "DD/MM/YYYY HH:mm", "DD-MM-YYYY", "DD/MM/YYYY", dayjs.ISO_8601],
+        true
+      );
+      return d.isValid() ? d.format('DD-MM-YYYY HH:mm') : String(followUpUpdatedAtRaw);
+    })();
     return {
       serial: fv.serialNo || pick(values, ['Quotation No.', 'Quotation No', 'Quotation_ID', 'Quotation ID', 'Serial']) || '-',
       name: fv.name || pick(values, ['Customer_Name', 'Customer Name', 'Name']) || '-',
@@ -592,6 +746,7 @@ export default function Quotation() {
       vehicle: [fv.company || payload.company || values.Company, fv.bikeModel || payload.model || values.Model, fv.variant || payload.variant || values.Variant].filter(Boolean).join(' ') || '-',
       branch: fv.branch || payload.branch || values.Branch || values['Branch Name'] || '-',
       followUpAt,
+      followUpUpdatedAt,
       followUpNotes: followUp.notes || values['Follow-up Notes'] || values['Follow Up Notes'] || values['Followup Notes'] || '',
       status,
       payload,
@@ -600,15 +755,10 @@ export default function Quotation() {
 
   const loadPendingCases = async ({ silent = false } = {}) => {
     if (!QUOT_GAS_URL) return;
-    if (!pendingBranchReady) {
-      setPendingItems([]);
-      setPendingLoaded(false);
-      return;
-    }
     if (!silent) setPendingLoading(true);
     try {
       const base = { action: 'list', page: 1, pageSize: 500 };
-      const filters = pendingBranch ? { branch: pendingBranch } : {};
+      const filters = (!isOwnerAdmin && pendingBranch) ? { branch: pendingBranch } : {};
       const resp = await saveBookingViaWebhook({ webhookUrl: QUOT_GAS_URL, method: 'GET', payload: { ...base, ...filters } });
       const js = resp?.data || resp;
       const rows = Array.isArray(js?.data) ? js.data : (Array.isArray(js?.rows) ? js.rows : []);
@@ -625,30 +775,18 @@ export default function Quotation() {
   };
 
   useEffect(() => {
-    if (!pendingBranchReady) {
-      setPendingItems([]);
-      setPendingLoaded(false);
-      return;
-    }
     setPendingItems([]);
     setPendingLoaded(false);
     loadPendingCases({ silent: true });
-  }, [pendingBranchReady, pendingBranch]);
+  }, [pendingBranch, isOwnerAdmin]);
 
   useEffect(() => {
-    if (brand === "NH") {
-      form.setFieldsValue({ executive: MEGHANA_NAME });
-      form.setFieldsValue({ branch: BRANCH_NAME });
-    }
-  }, [brand, form]);
-
-  useEffect(() => {
-    if (vehicleType === "scooter") {
-      setFittings(["Side Stand", "Floor Mat", "ISI Helmet", "Grip Cover"]);
-    } else {
-      setFittings(["Tank Cover", "Gripper", "Seat Cover", "ISI Helmet"]);
-    }
-  }, [vehicleType]);
+    setFittings((prev) => {
+      const uniquePrev = Array.from(new Set((Array.isArray(prev) ? prev : []).filter((x) => activeFittingsOptions.includes(x))));
+      const next = uniquePrev.length ? uniquePrev : [...activeFittingsDefaults];
+      return sameStringArray(prev, next) ? prev : next;
+    });
+  }, [activeFittingsOptions, activeFittingsDefaults]);
 
   const companies = useMemo(
     () => uniqCaseInsensitive(bikeData.map((r) => r.company)),
@@ -672,33 +810,70 @@ export default function Quotation() {
     return uniqCaseInsensitive(base.map((r) => r.variant));
   }, [bikeData, company, model]);
 
+  const companyOptions = useMemo(
+    () => companies.map((c) => ({ value: c, label: c })),
+    [companies]
+  );
+  const modelOptions = useMemo(
+    () => models.map((m) => ({ value: m, label: m })),
+    [models]
+  );
+  const variantOptions = useMemo(
+    () => variants.map((v) => ({ value: v, label: v })),
+    [variants]
+  );
+
+  const findCatalogPrice = useMemo(
+    () => (comp, mdl, varnt) => {
+      const compKey = normalizeKey(comp);
+      const modelKey = normalizeKey(mdl);
+      const variantKey = normalizeKey(varnt);
+      if (!compKey || !modelKey || !variantKey) return null;
+      const found = bikeData.find(
+        (r) =>
+          normalizeKey(r.company) === compKey &&
+          normalizeKey(r.model) === modelKey &&
+          normalizeKey(r.variant) === variantKey
+      );
+      if (!found) return null;
+      const price = Number(found.onRoadPrice || 0);
+      return Number.isFinite(price) && price > 0 ? price : null;
+    },
+    [bikeData]
+  );
+
   const handleVariant = (v) => {
     setVariant(v);
-    if (!manual) {
-      const compKey = normalizeKey(company);
-      const modelKey = normalizeKey(model);
-      const variantKey = normalizeKey(v);
-      const found = bikeData.find(
-        (r) => normalizeKey(r.company) === compKey && normalizeKey(r.model) === modelKey && normalizeKey(r.variant) === variantKey
-      );
-      const price = found?.onRoadPrice || 0;
+    const price = findCatalogPrice(company, model, v);
+    if (price !== null) {
       form.setFieldsValue({ onRoadPrice: price });
       setOnRoadPrice(price);
-      setDownPayment(0);
+      if (downPayment > price) {
+        setDownPayment(price);
+        form.setFieldsValue({ downPayment: price });
+      }
     }
   };
 
+  useEffect(() => {
+    const price = findCatalogPrice(company, model, variant);
+    if (price === null) return;
+    form.setFieldsValue({ onRoadPrice: price });
+    setOnRoadPrice(price);
+    if (downPayment > price) {
+      setDownPayment(price);
+      form.setFieldsValue({ downPayment: price });
+    }
+  }, [company, model, variant, findCatalogPrice, downPayment, form]);
+
   // ------ Per-vehicle EMI helpers ------
-  const rateFor = (price, dp) => {
-    const dpPct = price > 0 ? (dp || 0) / price : 0;
-    return dpPct >= 0.3 ? RATE_LOW : RATE_HIGH;
-  };
   const monthlyFor = (price, dp, months) => {
-    const principalBase = Math.max(Number(price || 0) - Number(dp || 0), 0);
-    const principal = principalBase + PROCESSING_FEE;
+    const priceNum = Math.max(Number(price || 0), 0);
+    const dpNum = Math.max(Number(dp || 0), 0);
+    const netPrice = Math.max(priceNum - dpNum, 0);
+    const principal = netPrice + Math.max(Number(processingFee || 0), 0);
     const years = months / 12;
-    const rate = rateFor(price, dp);
-    const totalInterest = principal * (rate / 100) * years;
+    const totalInterest = principal * (flatInterestRate / 100) * years;
     const total = principal + totalInterest;
     return months > 0 ? total / months : 0;
   };
@@ -723,11 +898,14 @@ export default function Quotation() {
   // ---------- Android-proof A4 print ----------
   const handlePrint = async () => {
     try {
+      refreshOwnerBranding();
+      await new Promise((r) => setTimeout(r, 0));
       if (Date.now() < actionCooldownUntil) return; // ignore rapid re-clicks
       startActionCooldown(6000);
       setPrinting(true);
       // Ensure spinner paints before heavy work
       await new Promise((r) => setTimeout(r, 0));
+      ensureActionFields();
       await validateCore(form);
       await safeAutoSave();
       await toastSaved("Saved (background sync). Preparing print…");
@@ -953,6 +1131,15 @@ export default function Quotation() {
     }
 
     // Existing behaviour for keeping local state in sync
+    if (typeof all?.company !== "undefined") {
+      setCompany(String(all.company || ""));
+    }
+    if (typeof all?.bikeModel !== "undefined") {
+      setModel(String(all.bikeModel || ""));
+    }
+    if (typeof all?.variant !== "undefined") {
+      setVariant(String(all.variant || ""));
+    }
     if (typeof all?.onRoadPrice !== "undefined") {
       setOnRoadPrice(Number(all.onRoadPrice || 0));
       if (downPayment > Number(all.onRoadPrice || 0)) {
@@ -968,7 +1155,6 @@ export default function Quotation() {
 
   const resetForm = () => {
     form.resetFields();
-    setBrand("SHANTHA");
     setCompany("");
     setModel("");
     setVariant("");
@@ -978,17 +1164,19 @@ export default function Quotation() {
     setEmiSet("12");
     setDownPayment(0);
     setVehicleType("scooter");
-    setFittings(["Side Stand", "Floor Mat", "ISI Helmet", "Grip Cover"]);
+    setFittings([...activeFittingsDefaults]);
     setDocsReq(DOCS_REQUIRED);
     setExtraVehicles([]);
     setFollowUpEnabled(true);
     setFollowUpAt(dayjs().add(2, 'day').hour(10).minute(0).second(0).millisecond(0));
     setFollowUpNotes("");
+    setLoadedQuotationMeta(null);
 
     // Restore default branch and executive
     const patch = {};
     if (defaultBranchName) patch.branch = defaultBranchName;
     if (defaultExecutiveName) patch.executive = defaultExecutiveName;
+    patch.address = DEFAULT_QUOTATION_ADDRESS;
     if (Object.keys(patch).length) form.setFieldsValue(patch);
     msgApi.success("Form has been reset for a new quotation.");
   };
@@ -1000,19 +1188,47 @@ export default function Quotation() {
   const wExec   = Form.useWatch("executive", form);
   const wName   = Form.useWatch("name", form);
   const wMobile = Form.useWatch("mobile", form);
+  const wAddress = Form.useWatch("address", form);
   const wComp   = Form.useWatch("company", form);
   const wModel  = Form.useWatch("bikeModel", form);
   const wVar    = Form.useWatch("variant", form);
   const wPrice  = Form.useWatch("onRoadPrice", form);
+  const wDownPayment = Form.useWatch("downPayment", form);
 
   const canAct = useMemo(() => {
     const mobileOk = /^[6-9]\d{9}$/.test(String(wMobile || ""));
     const priceOk  = Number(wPrice || 0) > 0;
+    const addressOk = Boolean(String(wAddress || "").trim());
+    const dp = Number(wDownPayment || 0);
+    const dpOk = mode !== "loan" || (dp > 0 && dp <= Number(wPrice || 0));
     return Boolean(
       wBranch && wExec && wName && mobileOk &&
-      wComp && wModel && wVar && priceOk
+      addressOk && wComp && wModel && wVar && priceOk && dpOk
     );
-  }, [wBranch, wExec, wName, wMobile, wComp, wModel, wVar, wPrice]);
+  }, [wBranch, wExec, wName, wMobile, wAddress, wComp, wModel, wVar, wPrice, wDownPayment, mode]);
+
+  const ensureActionFields = React.useCallback(() => {
+    const v = form.getFieldsValue(true) || {};
+    const missing = [];
+    if (!String(v.branch || "").trim()) missing.push("Branch");
+    if (!String(v.executive || "").trim()) missing.push("Executive Name");
+    if (!String(v.name || "").trim()) missing.push("Customer Name");
+    if (!/^[6-9]\d{9}$/.test(String(v.mobile || ""))) missing.push("Valid Mobile Number");
+    if (!String(v.address || "").trim()) missing.push("Address");
+    if (!String(v.company || "").trim()) missing.push("Company");
+    if (!String(v.bikeModel || "").trim()) missing.push("Model");
+    if (!String(v.variant || "").trim()) missing.push("Variant");
+    if (!(Number(v.onRoadPrice || 0) > 0)) missing.push("On-Road Price");
+    if (mode === "loan") {
+      const dp = Number(v.downPayment || 0);
+      const price = Number(v.onRoadPrice || 0);
+      if (!(dp > 0)) missing.push("Down Payment");
+      else if (dp > price) missing.push("Down Payment (must be <= On-Road Price)");
+    }
+    if (missing.length) {
+      throw new Error(`Please fill required fields: ${missing.join(", ")}`);
+    }
+  }, [form, mode]);
 
   /* ======================
      SAVE -> ASSIGN NEXT SERIAL -> SUBMIT
@@ -1092,11 +1308,23 @@ export default function Quotation() {
       fittingsLine
     ].filter(Boolean).join(" | ");
 
+    const nowIso = new Date().toISOString();
+    const loadedSerial = String(loadedQuotationMeta?.serialNo || "").trim();
+    const preserveLoadedTimes = Boolean(loadedSerial && loadedSerial === v.serialNo);
+    const savedAt = preserveLoadedTimes && loadedQuotationMeta?.savedAt
+      ? String(loadedQuotationMeta.savedAt)
+      : nowIso;
+    const createdAt = preserveLoadedTimes && loadedQuotationMeta?.createdAt
+      ? String(loadedQuotationMeta.createdAt)
+      : nowIso;
+
     // Build payload AFTER we have v and mergedRemarks
     const payload = {
       version: 1,
-      savedAt: new Date().toISOString(),
-      brand,                // "SHANTHA" | "NH"
+      savedAt,
+      createdAt,
+      updatedAt: nowIso,
+      brand: String(ORG_NAME || "Motera").toUpperCase(),
       mode,                 // "cash" | "loan"
       vehicleType,          // "scooter" | "motorcycle"
       fittings,             // array of strings
@@ -1111,6 +1339,7 @@ export default function Quotation() {
         enabled: Boolean(followUpEnabled),
         at: followUpEnabled && followUpAt && dayjs(followUpAt).isValid() ? dayjs(followUpAt).toISOString() : null,
         notes: String(followUpNotes || ""),
+        updatedAt: nowIso,
         assignedTo: v.executive || userStaffName || "",
         branch: v.branch || "",
         customer: { name: v.name || "", mobile: v.mobile || "" },
@@ -1149,10 +1378,11 @@ export default function Quotation() {
       },
       payload,
     };
+    setLoadedQuotationMeta({ serialNo: v.serialNo, savedAt, createdAt });
     const outboxId = enqueueOutbox({ type: 'quot', data });
     setTimeout(async () => {
       try {
-        const resp = await submitToWebhook(data);
+        const resp = await submitToWebhook(data, QUOT_GAS_URL);
         const ok = (resp?.data || resp)?.success !== false;
         if (ok) removeOutboxById(outboxId);
       } catch {
@@ -1174,6 +1404,7 @@ export default function Quotation() {
     try {
       if (Date.now() < actionCooldownUntil) return; // ignore rapid re-clicks
       startActionCooldown(6000);
+      ensureActionFields();
       await validateCore(form);
       // validate + save first (will assign serial)
       await safeAutoSave();
@@ -1186,7 +1417,7 @@ export default function Quotation() {
         return;
       }
 
-      const showroomName = (brand === "SHANTHA" ? "Shantha Motors" : "NH Motors");
+      const showroomName = ORG_NAME;
       const name = (form.getFieldValue("name") || "-").trim();
 
       // V1 (main)
@@ -1215,12 +1446,26 @@ export default function Quotation() {
       const execPhone = String(executivePhone || '').replace(/\D/g,'');
       const execNameDisplay = (v.executive || executiveName || curUser?.formDefaults?.staffName || curUser?.name || '-');
       const qDate = dayjs().format("DD-MM-YYYY HH:mm");
+      const waTemplate = getOwnerQuotationWhatsAppTemplate();
+      const orgMobilesLine = Array.isArray(ORG_MOBILES) && ORG_MOBILES.length
+        ? ORG_MOBILES.join(" / ")
+        : "9731366921 / 8073283502";
+      const waTokens = {
+        customerName: name || "-",
+        showroomName,
+        orgMobiles: orgMobilesLine,
+        organizationAddress: String(ORG_ADDR || "").trim() || "-",
+        "Organization Address": String(ORG_ADDR || "").trim() || "-",
+        quotationDate: qDate,
+        executiveName: execNameDisplay,
+        executivePhone: execPhone || "-",
+      };
 
       // Header
       const header = [
-        `*Hi ${name}, Welcome to ${showroomName}! 🏍️*`,
-        `Multi-brand two-wheeler sales, service, spares, exchange, finance & insurance`,
-        `*Mob No - 9731366921 / 8073283502*`,
+        applyTemplatePlaceholders(waTemplate.greetingLine, waTokens),
+        ...waTemplate.introLines.map((line) => applyTemplatePlaceholders(line, waTokens)),
+        applyTemplatePlaceholders(waTemplate.contactLine, waTokens),
         ``,
         `• *Quotation Date:* ${qDate}`,
       ];
@@ -1256,13 +1501,12 @@ export default function Quotation() {
       const footer = [
         ``,
         `• *Sales Executive:* ${execNameDisplay} (${execPhone || '-'})`,
-        `*Our Locations* 📍`,
-        `Muddinapalya • Hegganahalli • Nelagadrahalli • Andrahalli`,
-        `Kadabagere • Channenahalli • Tavarekere `,
+        applyTemplatePlaceholders(waTemplate.locationsTitle, waTokens),
+        ...waTemplate.locations.map((line) => applyTemplatePlaceholders(line, waTokens)),
         ``,
-        `• *Note:* Prices are indicative and may change without prior notice.`,
+        applyTemplatePlaceholders(waTemplate.noteLine, waTokens),
         ``,
-        `✨ *${showroomName} — Ride with Pride, Drive with Confidence.* ✨`
+        applyTemplatePlaceholders(waTemplate.closingLine, waTokens),
       ];
 
       const text = [...header, ...vblocks, ...afterVehicles, ...footer].join("\n");
@@ -1354,6 +1598,126 @@ export default function Quotation() {
       <style>{`
         .wrap { max-width: 1000px; margin: 12px auto; padding: 0 12px; }
         .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
+        .pending-trigger {
+          border-radius: 10px;
+          border: 1px solid #dbeafe;
+          background: linear-gradient(135deg, #eef4ff 0%, #f8fbff 100%);
+          color: #1d4ed8;
+          font-weight: 600;
+        }
+        .pending-modal .ant-modal-content {
+          border-radius: 16px;
+          overflow: hidden;
+          box-shadow: 0 20px 44px rgba(2, 6, 23, 0.22);
+        }
+        .pending-list {
+          display: grid;
+          gap: 10px;
+          max-height: 62vh;
+          overflow: auto;
+          padding-right: 4px;
+        }
+        .pending-item {
+          border: 1px solid #e5e7eb;
+          border-radius: 12px;
+          padding: 10px 12px;
+          background: #fff;
+          transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+        }
+        .pending-item:hover {
+          transform: translateY(-1px);
+          border-color: #bfdbfe;
+          box-shadow: 0 10px 18px rgba(30, 64, 175, 0.12);
+        }
+        .pending-item-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          margin-bottom: 6px;
+        }
+        .pending-person {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          min-width: 0;
+        }
+        .pending-avatar {
+          width: 32px;
+          height: 32px;
+          border-radius: 50%;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: linear-gradient(145deg, #1d4ed8, #2563eb);
+          color: #fff;
+          font-weight: 700;
+          flex-shrink: 0;
+        }
+        .pending-title {
+          font-size: 14px;
+          font-weight: 700;
+          line-height: 1.2;
+          color: #0f172a;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 360px;
+        }
+        .pending-meta {
+          display: grid;
+          gap: 8px;
+          color: #334155;
+          font-size: 13px;
+          line-height: 1.35;
+        }
+        .pending-line {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 6px;
+          min-width: 0;
+        }
+        .pending-chip {
+          display: inline-flex;
+          align-items: center;
+          padding: 3px 8px;
+          border-radius: 999px;
+          border: 1px solid #dbeafe;
+          background: #f8fbff;
+          color: #1e3a8a;
+          font-size: 12px;
+          font-weight: 600;
+          max-width: 100%;
+        }
+        .pending-chip-vehicle {
+          border-color: #fde68a;
+          background: #fffbeb;
+          color: #92400e;
+        }
+        .pending-chip-note {
+          border-color: #e2e8f0;
+          background: #f8fafc;
+          color: #334155;
+          font-weight: 500;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .pending-sep {
+          color: #94a3b8;
+          font-weight: 700;
+          line-height: 1;
+        }
+        .pending-time {
+          font-family: "SF Mono", "Menlo", "Monaco", monospace;
+          font-size: 12px;
+          font-weight: 600;
+          color: #0f172a;
+        }
+        @media screen and (max-width: 600px) {
+          .pending-title { max-width: 175px; }
+        }
         /* Make header actions stack on small screens */
         @media screen and (max-width: 600px) {
           .brand-actions-row { grid-template-columns: 1fr !important; row-gap: 8px; }
@@ -1387,18 +1751,14 @@ export default function Quotation() {
                   }}
                 >
                   <Form.Item label="Brand on Print" style={{ marginBottom: 0 }}>
-                    <Radio.Group value={brand} onChange={(e)=>setBrand(e.target.value)}>
-                      <Radio value="SHANTHA">Shantha Motors</Radio>
-                      <Radio value="NH">NH Motors (Honda)</Radio>
-                    </Radio.Group>
+                    <div style={{ fontWeight: 600 }}>{ORG_NAME}</div>
                   </Form.Item>
                   {/* Right-side stacked buttons */}
                   <div className="brand-actions" style={{ display: "flex", flexDirection: "row", gap: 8, alignItems: 'center' }}>
                     <FetchQuot
                       form={form}
                       webhookUrl={QUOT_GAS_URL}
-                      EXECUTIVES={EXECUTIVES}
-                      setBrand={setBrand}
+                      EXECUTIVES={execOptions}
                       setMode={setMode}
                       setVehicleType={setVehicleType}
                       setFittings={setFittings}
@@ -1413,6 +1773,7 @@ export default function Quotation() {
                       setFollowUpEnabled={setFollowUpEnabled}
                       setFollowUpAt={setFollowUpAt}
                       setFollowUpNotes={setFollowUpNotes}
+                      onPayloadMeta={setLoadedQuotationMeta}
                       autoApply={pendingAutoApply}
                       buttonText="Fetch Details"
                       buttonProps={{
@@ -1420,6 +1781,7 @@ export default function Quotation() {
                       }}
                     />
                     <Button
+                      className="pending-trigger"
                       onClick={async () => {
                         setPendingOpen(true);
                         await loadPendingCases();
@@ -1431,12 +1793,41 @@ export default function Quotation() {
                 </div>
               </Col>
               <Modal
-                title={pendingCount !== null ? `PendingCases (${pendingCount})` : "PendingCases"}
+                className="pending-modal"
+                title={
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                      <div
+                        style={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: 8,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          background: "#eff6ff",
+                          color: "#1d4ed8",
+                          fontWeight: 700,
+                        }}
+                      >
+                        P
+                      </div>
+                      <div style={{ fontWeight: 700, color: "#0f172a" }}>
+                        {pendingCount !== null ? `PendingCases (${pendingCount})` : "PendingCases"}
+                      </div>
+                    </div>
+                  </div>
+                }
                 open={pendingOpen}
                 onCancel={() => setPendingOpen(false)}
+                width={700}
                 footer={[
-                  <Button key="refresh" onClick={() => loadPendingCases()}>Refresh</Button>,
-                  <Button key="close" type="primary" onClick={() => setPendingOpen(false)}>Close</Button>,
+                  <Button key="refresh" icon={<ReloadOutlined />} onClick={() => loadPendingCases()}>
+                    Refresh
+                  </Button>,
+                  <Button key="close" type="primary" onClick={() => setPendingOpen(false)}>
+                    Close
+                  </Button>,
                 ]}
               >
                 {pendingLoading ? (
@@ -1444,15 +1835,20 @@ export default function Quotation() {
                     <Spin />
                   </div>
                 ) : pendingItems.length ? (
-                  <List
-                    size="small"
-                    dataSource={pendingItems}
-                    renderItem={(item) => (
-                      <List.Item
-                        actions={[
+                  <div className="pending-list">
+                    {pendingItems.map((item) => (
+                      <div key={`${item.serial || "pending"}-${item.mobile || ""}`} className="pending-item">
+                        <div className="pending-item-head">
+                          <div className="pending-person">
+                            <span className="pending-avatar">
+                              {(item.name || "P").charAt(0).toUpperCase()}
+                            </span>
+                            <div className="pending-title">{item.name || "-"}</div>
+                          </div>
                           <Button
                             size="small"
                             type="primary"
+                            icon={<EyeOutlined />}
                             onClick={() => {
                               if (!item?.payload) return;
                               setPendingAutoApply({ payload: item.payload, token: Date.now() });
@@ -1461,33 +1857,37 @@ export default function Quotation() {
                             }}
                           >
                             Open
-                          </Button>,
-                        ]}
-                      >
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 2, width: "100%" }}>
-                          <div style={{ fontWeight: 600 }}>{item.name || "-"}</div>
-                          <div>📞 {item.mobile || "-"} | 🧾 {item.serial || "-"}</div>
-                          <div>🏍️ {item.vehicle || "-"} | 🏢 {item.branch || "-"}</div>
-                          {item.followUpAt ? <div>🗓️ {item.followUpAt}</div> : null}
-                          {item.followUpNotes ? <div style={{ color: "#666" }}>{item.followUpNotes}</div> : null}
+                          </Button>
                         </div>
-                      </List.Item>
-                    )}
-                  />
+                        <div className="pending-meta">
+                          <div className="pending-line">
+                            <span className="pending-chip">{item.mobile || "-"}</span>
+                            <span className="pending-sep">|</span>
+                            <span className="pending-chip">{item.branch || "-"}</span>
+                            <span className="pending-sep">|</span>
+                            <span className="pending-chip pending-chip-vehicle">🏍️ {item.vehicle || "-"}</span>
+                          </div>
+                          <div className="pending-line">
+                            <span className="pending-time">{item.followUpAt || "-"}</span>
+                            <span className="pending-sep">|</span>
+                            <span className="pending-time">{item.followUpUpdatedAt || "-"}</span>
+                            {item.followUpNotes ? (
+                              <>
+                                <span className="pending-sep">-</span>
+                                <span className="pending-chip pending-chip-note">{item.followUpNotes}</span>
+                              </>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 ) : (
                   <div style={{ color: "#666" }}>No pending quotations.</div>
                 )}
               </Modal>
 
-              {/* Toggle manual/sheet mode for vehicle selection */}
-              <Col span={24}>
-                <Form.Item label="Type manually (no sheet)" valuePropName="checked">
-                  <Switch checked={manual} onChange={setManual} />
-                  <span style={{ marginLeft: 8, color: "#666" }}>
-                    {sheetOk ? "You can still switch to manual if needed." : "Sheet unavailable — manual mode enabled."}
-                  </span>
-                </Form.Item>
-              </Col>
+              
 
               {/* Quotation No. + Branch */}
               <Col xs={24} sm={12} md={6}>
@@ -1524,7 +1924,7 @@ export default function Quotation() {
                       showSearch
                       optionFilterProp="label"
                       placeholder="Select executive"
-                      options={(execOptions.length ? execOptions : EXECUTIVES).map((e) => ({ value: e.name, label: e.name }))}
+                      options={execOptions.map((e) => ({ value: e.name, label: e.name }))}
                     />
                   ) : (
                     <Input readOnly placeholder="Auto-fetched from your profile" />
@@ -1567,7 +1967,7 @@ export default function Quotation() {
               </Col>
 
               <Col xs={24}>
-                <Form.Item label="Address" name="address" rules={[{  message: "Enter address" }]}>
+                <Form.Item label="Address" name="address" rules={[{ required: true, message: "Enter address" }]}>
                   <Input.TextArea rows={2} placeholder="House No, Street, Area, City, PIN" />
                 </Form.Item>
               </Col>
@@ -1580,53 +1980,77 @@ export default function Quotation() {
               {/* Vehicle selection */}
               <Col xs={24} sm={12} md={8}>
                 <Form.Item label="Company" name="company" rules={[{ required: true, message: "Enter company" }]}>
-                  {manual ? (
-                    <Input placeholder="Type company" onChange={(e)=>setCompany(e.target.value)} />
-                  ) : (
-                    <Select
-                      placeholder="Select Company"
-                      options={companies.map((c) => ({ value: c, label: c }))}
-                      onChange={(val) => {
+                  <AutoComplete
+                    placeholder="Type company (e.g., TVS)"
+                    options={companyOptions}
+                    filterOption={(inputValue, option) =>
+                      String(option?.value || "").toLowerCase().includes(String(inputValue || "").toLowerCase())
+                    }
+                    onSelect={(val) => {
+                      setCompany(val);
+                      setModel("");
+                      setVariant("");
+                      form.setFieldsValue({ bikeModel: "", variant: "" });
+                    }}
+                  >
+                    <Input
+                      onChange={(e) => {
+                        const val = String(e?.target?.value || "");
                         setCompany(val);
-                        setModel(""); setVariant(""); setOnRoadPrice(0); setDownPayment(0);
-                        form.setFieldsValue({ bikeModel: undefined, variant: undefined, onRoadPrice: undefined });
+                        setModel("");
+                        setVariant("");
+                        form.setFieldsValue({ bikeModel: "", variant: "" });
                       }}
                     />
-                  )}
+                  </AutoComplete>
                 </Form.Item>
               </Col>
 
               <Col xs={24} sm={12} md={8}>
                 <Form.Item label="Model" name="bikeModel" rules={[{ required: true, message: "Enter model" }]}>
-                  {manual ? (
-                    <Input placeholder="Type model" onChange={(e)=>setModel(e.target.value)} />
-                  ) : (
-                    <Select
-                      placeholder="Select Model"
-                      disabled={!company}
-                      options={models.map((m) => ({ value: m, label: m }))}
-                      onChange={(val) => {
+                  <AutoComplete
+                    placeholder="Type model (e.g., ACTIVA)"
+                    disabled={!company}
+                    options={modelOptions}
+                    filterOption={(inputValue, option) =>
+                      String(option?.value || "").toLowerCase().includes(String(inputValue || "").toLowerCase())
+                    }
+                    onSelect={(val) => {
+                      setModel(val);
+                      setVariant("");
+                      form.setFieldsValue({ variant: "" });
+                    }}
+                  >
+                    <Input
+                      onChange={(e) => {
+                        const val = String(e?.target?.value || "");
                         setModel(val);
-                        setVariant(""); setOnRoadPrice(0); setDownPayment(0);
-                        form.setFieldsValue({ variant: undefined, onRoadPrice: undefined });
+                        setVariant("");
+                        form.setFieldsValue({ variant: "" });
                       }}
                     />
-                  )}
+                  </AutoComplete>
                 </Form.Item>
               </Col>
 
               <Col xs={24} sm={12} md={8}>
                 <Form.Item label="Variant" name="variant" rules={[{ required: true, message: "Enter variant" }]}>
-                  {manual ? (
-                    <Input placeholder="Type variant" onChange={(e)=>setVariant(e.target.value)} />
-                  ) : (
-                    <Select
-                      placeholder="Select Variant"
-                      disabled={!model}
-                      options={variants.map((v) => ({ value: v, label: v }))}
-                      onChange={handleVariant}
+                  <AutoComplete
+                    placeholder="Type variant"
+                    disabled={!model}
+                    options={variantOptions}
+                    filterOption={(inputValue, option) =>
+                      String(option?.value || "").toLowerCase().includes(String(inputValue || "").toLowerCase())
+                    }
+                    onSelect={handleVariant}
+                  >
+                    <Input
+                      onChange={(e) => {
+                        const val = String(e?.target?.value || "");
+                        setVariant(val);
+                      }}
                     />
-                  )}
+                  </AutoComplete>
                 </Form.Item>
               </Col>
 
@@ -1647,7 +2071,6 @@ export default function Quotation() {
                 >
                   <InputNumber
                     style={{ width: "100%" }}
-                    readOnly={!manual}
                     formatter={(val) => `₹ ${String(val ?? "0").replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`}
                     parser={(val) => String(val || "0").replace(/[₹,\s]/g, "")}
                   />
@@ -1711,20 +2134,7 @@ export default function Quotation() {
                 </>
               )}
 
-              {/* GLOBAL Vehicle Type & Fittings */}
-              <Col xs={24} md={12}>
-                <Form.Item label="Vehicle Type" name="vehicleType">
-                  <Radio.Group
-                    optionType="button"
-                    buttonStyle="solid"
-                    value={vehicleType}
-                    onChange={(e) => setVehicleType(e.target.value)}
-                  >
-                    <Radio.Button value="scooter">Scooter</Radio.Button>
-                    <Radio.Button value="motorcycle">Motorcycle</Radio.Button>
-                  </Radio.Group>
-                </Form.Item>
-              </Col>
+              
 
               <Col xs={24} md={12}>
                 <Form.Item label="Free Extra Fittings (shown on print)">
@@ -1732,7 +2142,7 @@ export default function Quotation() {
                     value={fittings}
                     onChange={setFittings}
                   >
-                    {(vehicleType === "scooter" ? SCOOTER_OPTIONS : MOTORCYCLE_OPTIONS).map((opt) => (
+                    {activeFittingsOptions.map((opt) => (
                       <div key={opt} style={{ marginBottom: 6 }}>
                         <Checkbox value={opt}>{opt}</Checkbox>
                       </div>
@@ -1754,12 +2164,7 @@ export default function Quotation() {
                 </Form.Item>
               </Col>
 
-              {/* Remarks */}
-              <Col xs={24}>
-                <Form.Item label="Remarks" name="remarks">
-                  <Input.TextArea rows={2} placeholder="Any notes for this quotation (optional)" />
-                </Form.Item>
-              </Col>
+              
 
               {/* Follow-up */}
               <Col span={24}>
@@ -1826,12 +2231,17 @@ export default function Quotation() {
                               onChange={(e) => onExtraChange(idx, { company: e.target.value })}
                             />
                           ) : (
-                            <Select
-                              placeholder="Select Company"
+                            <AutoComplete
+                              placeholder="Type company (e.g., TVS)"
                               value={ev.company || undefined}
-                              options={companies.map((c) => ({ value: c, label: c }))}
-                              onChange={(val) => onExtraChange(idx, { company: val })}
-                            />
+                              options={companies.map((c) => ({ value: c }))}
+                              filterOption={(inputValue, option) =>
+                                String(option?.value || "").toLowerCase().includes(String(inputValue || "").toLowerCase())
+                              }
+                              onSelect={(val) => onExtraChange(idx, { company: val })}
+                            >
+                              <Input onChange={(e) => onExtraChange(idx, { company: String(e?.target?.value || "") })} />
+                            </AutoComplete>
                           )}
                         </Col>
 
@@ -1843,13 +2253,18 @@ export default function Quotation() {
                               onChange={(e) => onExtraChange(idx, { model: e.target.value })}
                             />
                           ) : (
-                            <Select
-                              placeholder="Select Model"
+                            <AutoComplete
+                              placeholder="Type model"
                               disabled={!ev.company}
                               value={ev.model || undefined}
-                              options={evModels.map((m) => ({ value: m, label: m }))}
-                              onChange={(val) => onExtraChange(idx, { model: val })}
-                            />
+                              options={evModels.map((m) => ({ value: m }))}
+                              filterOption={(inputValue, option) =>
+                                String(option?.value || "").toLowerCase().includes(String(inputValue || "").toLowerCase())
+                              }
+                              onSelect={(val) => onExtraChange(idx, { model: val })}
+                            >
+                              <Input onChange={(e) => onExtraChange(idx, { model: String(e?.target?.value || "") })} />
+                            </AutoComplete>
                           )}
                         </Col>
 
@@ -1861,13 +2276,18 @@ export default function Quotation() {
                               onChange={(e) => onExtraChange(idx, { variant: e.target.value })}
                             />
                           ) : (
-                            <Select
-                              placeholder="Select Variant"
+                            <AutoComplete
+                              placeholder="Type variant"
                               disabled={!ev.model}
                               value={ev.variant || undefined}
-                              options={evVariants.map((v) => ({ value: v, label: v }))}
-                              onChange={(val) => onExtraChange(idx, { variant: val })}
-                            />
+                              options={evVariants.map((v) => ({ value: v }))}
+                              filterOption={(inputValue, option) =>
+                                String(option?.value || "").toLowerCase().includes(String(inputValue || "").toLowerCase())
+                              }
+                              onSelect={(val) => onExtraChange(idx, { variant: val })}
+                            >
+                              <Input onChange={(e) => onExtraChange(idx, { variant: String(e?.target?.value || "") })} />
+                            </AutoComplete>
                           )}
                         </Col>
 
@@ -1982,11 +2402,11 @@ export default function Quotation() {
             <div className="hdr-line">
               <div style={{ textAlign: "center", marginRight: 12 }}>
                 <img
-                  src={"/location-qr.png"}
+                  src={ORG_LOCATION_QR_URL}
                   alt="Location QR"
-                  style={{ height: 50, objectFit: "contain" }}
+                  style={{ width: 64, height: 64, objectFit: "contain" }}
                 />
-                <div style={{ fontSize: 8, fontWeight: 600, marginTop: 4 }}>Scan for Location</div>
+                <div style={{ fontSize: 9, fontWeight: 600, marginTop: 1 }}>Scan for Location</div>
               </div>
 
               <div className="hdr-title">
@@ -2011,91 +2431,86 @@ export default function Quotation() {
                 className="brand-row2"
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1fr auto",
+                  gridTemplateColumns: "1fr 165px",
                   columnGap: 16,
-                  alignItems: "center",
+                  alignItems: "stretch",
                 }}
               >
-                {/* LEFT: brand names + addresses + mobiles */}
-                <div>
-                  {/* Brand names horizontally */}
+                {/* LEFT: regional + english + address + mobiles */}
+                <div style={{ minWidth: 0 }}>
+                  {ORG_NAME_REGIONAL ? (
+                    <div
+                      style={{
+                        fontSize: `${ORG_NAME_REGIONAL_FONT_SIZE_PT}pt`,
+                        fontWeight: ORG_NAME_REGIONAL_FONT_WEIGHT,
+                        fontFamily: ORG_NAME_REGIONAL_FONT_FAMILY || undefined,
+                        lineHeight: 1.1,
+                        marginBottom: 4,
+                      }}
+                    >
+                      {ORG_NAME_REGIONAL}
+                    </div>
+                  ) : null}
                   <div
+                    className="title-en"
                     style={{
-                      display: "flex",
-                      alignItems: "baseline",
-                      gap: 10,
-                      flexWrap: "wrap",
-                      marginBottom: 4,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
+                      fontSize: `${ORG_NAME_FONT_SIZE_PT}pt`,
+                      fontWeight: ORG_NAME_FONT_WEIGHT,
+                      fontFamily: ORG_NAME_FONT_FAMILY || undefined,
+                      color: ORG_NAME_FONT_COLOR || "#000000",
+                      lineHeight: 1.1,
+                      marginBottom: 6,
                     }}
                   >
-                    {brand === "SHANTHA" ? (
-                      <>
-                        <div className="title-kn" style={{ fontSize: "25pt", fontWeight: 800 }}>
-                          ಶಾಂತ ಮೋಟರ್ಸ್
-                        </div>
-                        <div className="title-en" style={{ fontSize: "20pt", fontWeight: 800 }}>
-                          Shantha Motors
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="title-knhonda" style={{ fontSize: "25pt", fontWeight: 800 }}>
-                          ಎನ್ ಎಚ್ ಮೋಟರ್ಸ್
-                        </div>
-                        <div className="title-en" style={{ fontSize: "18pt", fontWeight: 700 }}>
-                          NH Motors
-                        </div>
-                      </>
-                    )}
+                    {ORG_NAME}
                   </div>
 
-                  {/* Addresses + mobile */}
-                  {brand === "SHANTHA" ? (
-                    <>
-                      <div className="addr-line" style={{ fontSize: "13pt" }}>
-                        • Muddinapalya • Hegganahalli   • Nelagadrahalli  • Andrahalli
-                      </div>
-                      <div className="addr-line" style={{ fontSize: "13pt" }}>
-                        • Kadabagere   • Channenahali  • Tavarekere 
-                      </div>
-                      <div style={{ marginTop: 6, fontWeight: 600 }}>
-                        Mob: 9731366921 / 8073283502 / 9035131806
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="addr-linehonda" style={{ fontSize: "12pt" }}>
-                        Site No. 116/1, Bydarahalli, Magadi Main Road, Opp. HP Petrol Bunk, Bangalore - 560091
-                      </div>
-                      <div style={{ marginTop: 6, fontWeight: 600 }}>
-                        Mob: 9731366921 / 8073283502 / 9741609799
-                      </div>
-                    </>
-                  )}
+                  {ORG_ADDR ? (
+                    <div
+                      className="addr-line"
+                      style={{
+                        fontSize: `${ORG_ADDR_FONT_SIZE_PT}pt`,
+                        fontWeight: ORG_ADDR_FONT_WEIGHT,
+                        lineHeight: 1.28,
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {ORG_ADDR}
+                    </div>
+                  ) : null}
+
+                  {ORG_MOBILES.length ? (
+                    <div style={{ marginTop: 6, fontSize: "12pt", fontWeight: 700 }}>
+                      Mob No: {ORG_MOBILES.join(" / ")}
+                    </div>
+                  ) : null}
                 </div>
 
-                {/* RIGHT: logo only */}
+                {/* RIGHT: fixed logo box */}
                 <div
                   className="brand-right"
                   style={{
                     display: "flex",
-                    flexDirection: "row",
                     alignItems: "center",
-                    gap: 16,
-                    justifyContent: "flex-end",
+                    justifyContent: "center",
+                    width: 165,
+                    minHeight: 165,
+                    border: "1px solid #000",
+                    borderRadius: 6,
+                    overflow: "hidden",
                   }}
                 >
-                  <img
-                    src={brand === "SHANTHA" ? "/shantha-logoprint.jpg" : "/honda-logo.png"}
-                    alt="Brand Logo"
-                    style={{
-                      height: 130,
-                      objectFit: "contain",
-                    }}
-                  />
+                  {ORG_LOGO_URL ? (
+                    <img
+                      src={ORG_LOGO_URL}
+                      alt={ORG_NAME}
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "contain",
+                      }}
+                    />
+                  ) : <div style={{ fontSize: 11, color: "#777" }}>Logo</div>}
                 </div>
               </div>
             </div>
@@ -2229,7 +2644,7 @@ export default function Quotation() {
                   }}
                 >
                   <img
-                    src={"/shantha-access.png"}
+                    src={"/motera-access.png"}
                     alt="Accessories"
                     style={{ height: 140, margin: "6px 0" }}
                   />

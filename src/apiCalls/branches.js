@@ -1,4 +1,5 @@
 import { axiosInstance } from ".";
+import { getTenantOwnerId } from "../utils/ownerConfig";
 
 export const listBranches = async (params = {}) => {
   const { data, status } = await axiosInstance.get("/branches", {
@@ -9,8 +10,9 @@ export const listBranches = async (params = {}) => {
 };
 
 export const listBranchesPublic = async (params = {}) => {
+  const ownerId = getTenantOwnerId();
   const { data, status } = await axiosInstance.get("/branches/public", {
-    params,
+    params: ownerId ? { ...params, ownerId } : params,
     validateStatus: () => true,
   });
   return { ...data, _status: status };

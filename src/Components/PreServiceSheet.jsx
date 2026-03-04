@@ -1,4 +1,13 @@
 import React, { forwardRef } from "react";
+import {
+  getOwnerOrgName,
+  getOwnerOrgNameRegional,
+  
+  getOwnerOrgMobiles,
+ 
+  getOwnerLocationQrUrl,
+  resolveLocationQrImageUrl,
+} from "../utils/ownerConfig";
 import { inr, fmtDate, tick } from "../utils/printUtils";
 
 /**
@@ -15,6 +24,8 @@ const PreServiceSheet = forwardRef(function PreServiceSheet(
     vals,              // form values (JobCard.jsx already has this)
     labourRows,        // array of {desc, qty, rate}
     executives = [],
+    executivePhone = "",
+    locationQrUrl: locationQrUrlProp = "",
     observationLines,  // built in JobCard.jsx
   },
   ref
@@ -58,14 +69,6 @@ const PreServiceSheet = forwardRef(function PreServiceSheet(
     <span aria-hidden="true" style={{ display: "inline-block", width: w }} />
   );
 
-  const execPhone = (() => {
-    const raw = String(vals?.executive || "").trim();
-    const asDigits = raw.replace(/\D/g, "");
-    if (/^\d{10}$/.test(asDigits)) return asDigits;
-    const match = (executives || []).find((e) => e.name === raw);
-    return match?.phone || null;
-  })();
-
   // Normalize floorMat from form (accepts true/false or "Yes"/"No"/"Y"/"N"/"1"/"0")
   const floorMatYes = (() => {
     const v = vals?.floorMat;
@@ -74,12 +77,39 @@ const PreServiceSheet = forwardRef(function PreServiceSheet(
     return s === "yes" || s === "y" || s === "true" || s === "1";
   })();
   const floorMatNo = vals?.floorMat != null ? !floorMatYes : false;
-  const branchKey = String(vals?.branch || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "");
-  const isNH = branchKey.includes("byadarahalli"); // Switch branding for Byadarahalli
+ 
+  const orgName = getOwnerOrgName() || "Motera";
+  const orgNameRegional = getOwnerOrgNameRegional();
+
+  const locationQrUrl = resolveLocationQrImageUrl(locationQrUrlProp) || getOwnerLocationQrUrl() || "/location-qr.png";
+  const orgMobiles = getOwnerOrgMobiles();
+  const mobLine = orgMobiles.length ? orgMobiles.join(" / ") : "-";
   const serviceTypeList = ["Free", "Paid", "Minor", "Accidental"];
+  const executiveName = String(vals?.executive || vals?.advisor || "-").trim() || "-";
+  const mechanicName = String(vals?.mechanic || "-").trim() || "-";
+  const explicitExecPhone = String(executivePhone || vals?.executivePhone || "").replace(/\D/g, "");
+  const matchedExecPhone = (() => {
+    const m = (executives || []).find(
+      (e) => String(e?.name || "").trim().toLowerCase() === executiveName.toLowerCase()
+    );
+    return String(m?.phone || m?.mobile || "").replace(/\D/g, "");
+  })();
+  const localExecPhone = (() => {
+    try {
+      const raw = localStorage.getItem("user");
+      const u = raw ? JSON.parse(raw) : null;
+      const userName = String(u?.name || u?.formDefaults?.staffName || "").trim().toLowerCase();
+      const currentName = String(executiveName || "").trim().toLowerCase();
+      if (currentName && userName && currentName !== userName) return "";
+      return String(u?.phone || "").replace(/\D/g, "");
+    } catch {
+      return "";
+    }
+  })();
+  const execPhone = (() => {
+    const d = explicitExecPhone || matchedExecPhone || localExecPhone;
+    return d || "-";
+  })();
 
   return (
     // 👇 Attach the ref here — parent will pass this to handleSmartPrint(...)
@@ -143,7 +173,7 @@ img { max-width: 100%; height: auto; background: transparent; }
 
 /* Titles */
 .title-kn { font-size: 18pt; font-weight: 500; letter-spacing: 1px; }
-.title-en { font-size: 25pt; font-weight: 700; margin-top: 2px; }
+.title-en { font-size: 25pt; font-weight: 800; margin-top: 2px; }
 .title-wrap {
   display: flex;
   align-items: baseline;
@@ -189,6 +219,7 @@ img { max-width: 100%; height: auto; background: transparent; }
 }
 .voucher .brand-kn{ font-size:18pt; font-weight:500; line-height:1.05; }
 .voucher .brand-en{ font-size:18pt; font-weight:500; line-height:1.05; }
+.voucher .brand-sep{ font-size:18pt; font-weight:500; line-height:1.05; }
 
 /* Single outer box inside voucher: left | middle | right(=QR) */
 .voucher .box {
@@ -203,12 +234,17 @@ img { max-width: 100%; height: auto; background: transparent; }
 }
 .voucher .col { text-align: left; }
 .voucher .col-right { text-align: center; }
-.voucher .qr { height: 60px; width: 60px; object-fit: contain; }
-.voucher .scan { font-size: 13px; font-weight: 600; margin-top: 4px; }
+.voucher .qr { height: 70px; width: 70px; object-fit: contain; }
+.voucher .scan { font-size: 18px; font-weight: 600; margin-top: 4px; }
 .voucher .phones { margin-top: 2px; }
 /* Light helper for address lines */
 .shop-sub { font-size: 12pt; }
 .shop-addr { font-size: 11pt; }
+.head-info { font-size: 20px; line-height: 1.4; }
+.qr-top { text-align: center; }
+.qr-top-img { width: 70px; height: 70px; object-fit: contain; }
+.qr-top-scan { font-size: 10px; font-weight: 200; margin-top: 2px; }
+.qr-top-mob { font-size: 12px; margin-top: 1px; }
 
 /* Damage section */
 .damage-box { border: 1px solid #111; padding: 2mm; min-width: 38mm; }
@@ -247,39 +283,27 @@ img { max-width: 100%; height: auto; background: transparent; }
         <div className="pre-wrap">
           {/* Header */}
           <div className="title-wrap">
-            <div className="title-en">{isNH ? "NH MOTORS JOB CARD" : "SHANTHA MOTORS JOB CARD"}</div>
-            <div className="title-kn">{isNH ? "ಎನ್ ಎಚ್ ಮೋಟರ್ಸ್" : "ಶಾಂತ ಮೋಟರ್ಸ್"}</div>
+            <div className="title-en">{orgName.toUpperCase()} JOB CARD</div>
+            {orgNameRegional ? <div className="title-kn">{orgNameRegional}</div> : null}
           </div>
-          {isNH && (
-            <div style={{ marginTop: 2 }}>
-              <div className="shop-addr">
-                Site No. 116/1, Bydarahalli, Magadi Main Road, Opp.<br />
-                HP Petrol Bunk, Bangalore - 560091
-              </div>
-              <div className="shop-sub">Mob: 9731366921 / 8073283502 / 9741609799</div>
-            </div>
-          )}
+          
 
 
           {/* JC / Exec / Date / Mechanic + Location QR side by side */}
           <div className="box row-2" style={{ marginTop: 3 }}>
             {/* LEFT SIDE */}
-            <div style={{ fontSize: "20px", lineHeight: "1.4" }}>
+            <div className="head-info">
               <div><span className="label">Job Card No:</span> {vals.jcNo || "-"}</div>
-              <div><span className="label">Executive:</span> {vals.executive || "-"}</div>
+              <div><span className="label">Executive:</span> {executiveName}</div>
               <div><span className="label">Date:</span> {fmtDate(vals.createdAt)}</div>
-              <div><span className="label">Mechanic:</span> {vals.mechanic || "-"}</div>
+              <div><span className="label">Mechanic:</span> {mechanicName}</div>
             </div>
 
             {/* RIGHT SIDE (Location) */}
-            <div className="center">
-              <img src="/location-qr.png" alt="location qr" style={{ height: 60 }} />
-              <div className="scan">Scan for Location</div>
-              <div className="tiny" style={{ marginTop: 3 }}>
-                {isNH
-                  ? "Mob: 9731366921 / 8073283502 / 9741609799"
-                  : "Mob: 9731366921 / 8073283502"}
-              </div>
+            <div className="qr-top">
+              <img src={locationQrUrl} alt="Location QR" className="qr-top-img" />
+              <div className="qr-top-scan">Scan for Location</div>
+              <div className="qr-top-mob">Mob: {mobLine}</div>
             </div>
           </div>
 
@@ -414,13 +438,13 @@ img { max-width: 100%; height: auto; background: transparent; }
         <div className="pre-wrap voucher">
           {/* One continuous line: Kannada | English */}
           <div className="brand-line">
-            <span className="brand-kn">{isNH ? "ಎನ್ ಎಚ್ ಮೋಟರ್ಸ್" : "ಶಾಂತ ಮೋಟರ್ಸ್"}</span>
-            <span> || </span>
-            <span className="brand-en">{isNH ? "NH MOTORS" : "SHANTHA MOTORS"}</span>
+            {orgNameRegional ? <span className="brand-kn">{orgNameRegional}</span> : null}
+            <span className="brand-sep">||</span>
+            <span className="brand-en">{orgName.toUpperCase()}</span>
           </div>
 
           {/* Three blocks directly below */}
-          <div className="box" style={{ fontSize: "20px", lineHeight: "1.3", marginTop: "2mm" }}>
+          <div className="box" style={{ fontSize: "18px", lineHeight: "1.3", marginTop: "2mm" }}>
             {/* LEFT */}
             <div className="col">
               <div><span className="label">Job Card No:</span> {vals?.jcNo || "-"}</div>
@@ -431,15 +455,15 @@ img { max-width: 100%; height: auto; background: transparent; }
             {/* MIDDLE */}
             <div className="col">
               <div><span className="label">Date:</span> {fmtDate(vals?.createdAt)}</div>
-              <div><span className="label">Executive No:</span> {execPhone || "-"}</div>
+              <div><span className="label">Executive No:</span> {execPhone}</div>
               <div><span className="label">Apprx. Service Amount:</span> {inr(estimatedTotal)}</div>
             </div>
 
             {/* RIGHT: QR */}
             <div className="col col-right">
-              <img src="/location-qr.png" alt="Location QR" className="qr" />
+              <img src={locationQrUrl} alt="Location QR" className="qr" />
               <div className="scan">Scan for Location</div>
-              <div className="tiny phones">{isNH ? "9731366921 • 8073283502 • 9741609799" : "9731366921 • 8073283502"}</div>
+              <div className="phones tiny">{mobLine}</div>
             </div>
           </div>
         </div>

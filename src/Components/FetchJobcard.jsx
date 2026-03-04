@@ -1,9 +1,10 @@
 // FetchJobcard.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Modal, Input, List, Space, Spin, message, Radio } from "antd";
-import { saveJobcardViaWebhook } from "../apiCalls/forms";
+import { saveBookingViaWebhook, saveJobcardViaWebhook } from "../apiCalls/forms";
 import dayjs from "dayjs";
 import FetchQuot from "./FetchQuot"; // NEW: for fetching saved quotations
+import { resolveUnifiedGasUrl } from "../utils/ownerConfig";
 
 /**
  * Props:
@@ -37,13 +38,20 @@ export default function FetchJobcard({
   onAutoSearchStatusChange,
 }) {
   const JOB_SECRET = import.meta.env?.VITE_JOBCARD_GAS_SECRET || '';
+  const BOOKING_SECRET = import.meta.env?.VITE_BOOKING_GAS_SECRET || '';
+  const DEFAULT_BOOKING_GAS_URL =
+    "https://script.google.com/macros/s/AKfycbz_DoNoD0XTx3RNMOSZfypbMqWVN4yTy3ct96aE4LhJ9yb_YvKr0GRbO_GA3Fgkwptb/exec?module=booking";
+  const BOOKING_GAS_URL = resolveUnifiedGasUrl(
+    "booking",
+    import.meta.env?.VITE_BOOKING_GAS_URL || DEFAULT_BOOKING_GAS_URL
+  );
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState("mobile"); // mobile | vehicle
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [matches, setMatches] = useState([]);
   const [notFoundText, setNotFoundText] = useState("");
-  const [applyPrefillMode, setApplyPrefillMode] = useState(prefillMode);
+  const [, setApplyPrefillMode] = useState(prefillMode);
   const applyModeRef = useRef(prefillMode);
 
   const { BRANCHES, MECHANIC, EXECUTIVES, VEHICLE_TYPES, SERVICE_TYPES } =
@@ -236,6 +244,104 @@ export default function FetchJobcard({
     setPostServiceLock(info);
   };
 
+  const bookingRowTsMs = (row) => {
+    const values = row?.values || {};
+    const p = row?.payload || row || {};
+    const raw =
+      p?.ts ||
+      p?.createdAt ||
+      p?.savedAt ||
+      values?.["Submitted At"] ||
+      values?.Timestamp ||
+      values?.Time ||
+      values?.Date ||
+      row?.Timestamp ||
+      "";
+    const d = dayjs(raw);
+    return d.isValid() ? d.valueOf() : 0;
+  };
+
+  const applyBookingRowToForm = (row, options = {}) => {
+    const values = row?.values || {};
+    const p = row?.payload || row || {};
+    const v = p?.vehicle || {};
+    const first = (...vals) => {
+      for (const vv of vals) {
+        if (vv === undefined || vv === null) continue;
+        const s = String(vv).trim();
+        if (s) return s;
+      }
+      return "";
+    };
+    const regNoRaw = first(
+      v?.regNo,
+      v?.registrationNumber,
+      p?.vehicleNo,
+      p?.regNo,
+      values?.["Vehicle No"],
+      values?.Vehicle_No,
+      values?.RegNo,
+      values?.["Reg No"],
+      values?.["Registration Number"]
+    );
+    const resolvedRegNo = formatReg(regNoRaw, "");
+    const forcedRegNo = formatReg(options?.preserveRegNo || "", "");
+    const regNo = forcedRegNo || resolvedRegNo;
+    const branch = first(p?.branch, values?.Branch);
+    const executive = first(
+      p?.executive,
+      p?.staffName,
+      values?.Executive,
+      values?.["Executive Name"]
+    );
+    const company = String(first(v?.company, p?.company, values?.Company)).toUpperCase();
+    const model = String(first(v?.model, p?.model, values?.Model)).toUpperCase();
+    const colour = first(v?.color, p?.color, values?.Colour, values?.Color);
+    const chassisNo = String(first(v?.chassisNo, p?.chassisNo, values?.["Chassis Number"], values?.["Chassis No"])).toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const custName = first(p?.customerName, p?.name, values?.["Customer Name"], values?.Name);
+    const custMobile = String(first(p?.mobileNumber, p?.mobile, values?.["Mobile Number"], values?.Mobile)).replace(/\D/g, "").slice(-10);
+    const notes = first(p?.notes, values?.Notes);
+    form.setFieldsValue({
+      branch: branch || undefined,
+      executive: executive || undefined,
+      regNo,
+      company,
+      model,
+      colour: colour || undefined,
+      chassisNo: chassisNo || undefined,
+      custName: custName || undefined,
+      custMobile: custMobile || undefined,
+      obs: notes ? String(notes).toUpperCase() : undefined,
+    });
+    setRegDisplay?.(regNo);
+    message.success("Details filled from Booking.");
+  };
+
+  const fetchBookingRowsInline = async (queryText, modeNow) => {
+    if (!BOOKING_GAS_URL) return [];
+    const reg = normalizeReg(queryText);
+    const mobile = tenDigits(queryText);
+    const payloads = [];
+    if (modeNow === "vehicle") {
+      payloads.push({ action: "search", mode: "vehicle", query: reg });
+      payloads.push({ action: "search", mode: "reg", query: reg });
+    } else {
+      payloads.push({ action: "search", mode: "mobile", query: mobile || queryText });
+    }
+    for (const base of payloads) {
+      const payload = BOOKING_SECRET ? { ...base, secret: BOOKING_SECRET } : base;
+      try {
+        const resp = await saveBookingViaWebhook({ webhookUrl: BOOKING_GAS_URL, method: "GET", payload });
+        const js = resp?.data || resp;
+        const rows = Array.isArray(js?.rows) ? js.rows : (Array.isArray(js?.data) ? js.data : []);
+        if (rows.length) return rows;
+      } catch {
+        // try next mode
+      }
+    }
+    return [];
+  };
+
   // smarter match: exact → startsWith → contains; ignore case/spaces
   const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, "");
   const chooseBest = (list, val) => {
@@ -301,20 +407,35 @@ export default function FetchJobcard({
     // Normalize rows: merge sheet values into payload.formValues so all fields reflect
     const norm = rows.map((r) => {
       const v = r && r.values ? r.values : {};
+      const firstNonEmpty = (...vals) => {
+        for (const vv of vals) {
+          if (vv === undefined || vv === null) continue;
+          const s = String(vv).trim();
+          if (s) return s;
+        }
+        return "";
+      };
       const postAtFromValues = String(v.Post_Service_At || v.Post_Service_at || v.Post_Service || '').trim();
       const fvFromValues = {
-        jcNo: String(v['JC No.'] || ''),
-        branch: String(v.Branch || ''),
-        regNo: formatReg(v.Vehicle_No || v['Vehicle No'] || '', ''),
-        model: String(v.Model || ''),
-        colour: String(v.Colour || v.Color || ''),
-        km: String(v.KM || v['Odometer Reading'] || v['Odomete Reading'] || '').replace(/\D/g,'') || '',
-        serviceType: String(v.Service_Type || v['Service Type'] || ''),
-        custName: String(v.Customer_Name || ''),
-        custMobile: String(v.Mobile || ''),
-        obs: String(v.Customer_Observation || ''),
-        expectedDelivery: String(v.Expected_Delivery_Date || ''),
-        amount: String(v.Collected_Amount || ''),
+        jcNo: firstNonEmpty(v['JC No.'], v['JC No'], v.JCNo),
+        branch: firstNonEmpty(v.Branch),
+        regNo: formatReg(firstNonEmpty(v.Vehicle_No, v['Vehicle No'], v['Registration Number'], v.RegNo), ''),
+        company: String(firstNonEmpty(v.Company, v.company) || '').toUpperCase(),
+        model: String(firstNonEmpty(v.Model) || '').toUpperCase(),
+        colour: firstNonEmpty(v.Colour, v.Color),
+        chassisNo: String(firstNonEmpty(v.Chassis_No, v['Chassis No'], v.ChassisNo, v.Chassis) || '').toUpperCase().replace(/[^A-Z0-9]/g, ""),
+        km: String(firstNonEmpty(v.KM, v['Odometer Reading'], v['Odomete Reading']) || '').replace(/\D/g,'') || '',
+        fuelLevel: firstNonEmpty(v.Fuel_Level, v['Fuel Level']),
+        serviceType: firstNonEmpty(v.Service_Type, v['Service Type']),
+        vehicleType: firstNonEmpty(v.Vehicle_Type, v['Vehicle Type']),
+        custName: firstNonEmpty(v.Customer_Name, v['Customer Name'], v.Name),
+        custMobile: String(firstNonEmpty(v.Mobile, v['Mobile Number'], v.Phone) || '').replace(/\D/g,'').slice(-10),
+        obs: firstNonEmpty(v.Customer_Observation, v['Customer Observation'], v.Observation, v.Notes),
+        expectedDelivery: firstNonEmpty(v.Expected_Delivery_Date, v['Expected Delivery Date'], v['Expected Delivery']),
+        amount: firstNonEmpty(v.Collected_Amount, v['Collected Amount'], v.Amount),
+        paymentMode: firstNonEmpty(v.Payment_Mode, v['Payment Mode']),
+        executive: firstNonEmpty(v.Executive, v['Executive Name']),
+        mechanic: firstNonEmpty(v.Allotted_Mechanic, v['Allotted Mechanic'], v.Mechanic),
       };
       if (r && r.payload && typeof r.payload === 'object') {
         const p = r.payload || {};
@@ -330,15 +451,16 @@ export default function FetchJobcard({
         };
       }
       return {
-        payload: {
-          formValues: fvFromValues,
-          labourRows: [],
-          totals: {},
-          postServiceAt: postAtFromValues || undefined,
-          postServiceLogged: Boolean(postAtFromValues),
-          _values: v,
-        }
-      };
+          payload: {
+            formValues: fvFromValues,
+            labourRows: [],
+            totals: {},
+            paymentMode: fvFromValues.paymentMode || undefined,
+            postServiceAt: postAtFromValues || undefined,
+            postServiceLogged: Boolean(postAtFromValues),
+            _values: v,
+          }
+        };
     });
     return { mode: 'webhook', rows: norm };
   };
@@ -384,9 +506,9 @@ export default function FetchJobcard({
 
     const fields = {
       jcNo, // ← ensure JC No updates
-      branch: chooseBest(BRANCHES, branch) || undefined,
-      mechanic, // may be undefined if no close match
-      executive, // may be undefined if no close match
+      branch: chooseBest(BRANCHES, branch) || branch || undefined,
+      mechanic: mechanic || mechanicRaw || undefined,
+      executive: executive || executiveRaw || undefined,
       expectedDelivery: expectedDelivery || null,
       regNo,
       chassisNo,
@@ -430,6 +552,12 @@ export default function FetchJobcard({
 
   const applyRowToForm = (row) => {
     const { fields, serviceType, vehicleType } = mapRowToForm(row);
+    try {
+      const createdAt = parseTimestamp(row);
+      if (createdAt && createdAt.isValid && createdAt.isValid()) {
+        fields.savedAt = createdAt.toISOString();
+      }
+    } catch { /* ignore */ }
 
     if (applyModeRef.current === "basic") {
       applyBasicFields(fields);
@@ -462,25 +590,75 @@ export default function FetchJobcard({
   };
 
   // Apply using our saved payload JSON (when fetched via webhook)
-  const applyPayloadToForm = (p) => {
+  const applyPayloadToForm = (p, options = {}) => {
     try {
+      const values = p?._values || {};
+      const firstNonEmpty = (...vals) => {
+        for (const vv of vals) {
+          if (vv === undefined || vv === null) continue;
+          const s = String(vv).trim();
+          if (s) return s;
+        }
+        return "";
+      };
+      const fv = p?.formValues || {};
+      const resolved = {
+        jcNo: firstNonEmpty(fv.jcNo, values['JC No.'], values['JC No'], values.JCNo),
+        branch: firstNonEmpty(fv.branch, values.Branch),
+        mechanic: firstNonEmpty(fv.mechanic, values.Allotted_Mechanic, values['Allotted Mechanic'], values.Mechanic),
+        executive: firstNonEmpty(fv.executive, values.Executive, values['Executive Name']),
+        expectedDelivery: firstNonEmpty(fv.expectedDelivery, values.Expected_Delivery_Date, values['Expected Delivery Date'], values['Expected Delivery']),
+        regNo: firstNonEmpty(fv.regNo, values.Vehicle_No, values['Vehicle No'], values['Registration Number'], values.RegNo),
+        company: firstNonEmpty(fv.company, values.Company),
+        model: firstNonEmpty(fv.model, values.Model),
+        colour: firstNonEmpty(fv.colour, fv.color, values.Colour, values.Color),
+        chassisNo: firstNonEmpty(fv.chassisNo, fv.chassis, values.Chassis_No, values['Chassis No'], values.ChassisNo, values.Chassis),
+        km: firstNonEmpty(fv.km, values.KM, values['Odometer Reading'], values['Odomete Reading']),
+        fuelLevel: firstNonEmpty(fv.fuelLevel, values.Fuel_Level, values['Fuel Level']),
+        callStatus: firstNonEmpty(fv.callStatus),
+        custName: firstNonEmpty(fv.custName, values.Customer_Name, values['Customer Name'], values.Name),
+        custMobile: firstNonEmpty(fv.custMobile, values.Mobile, values['Mobile Number'], values.Phone),
+        obs: firstNonEmpty(fv.obs, values.Customer_Observation, values['Customer Observation'], values.Observation, values.Notes),
+        vehicleType: firstNonEmpty(fv.vehicleType, values.Vehicle_Type, values['Vehicle Type']),
+        serviceType: firstNonEmpty(fv.serviceType, values.Service_Type, values['Service Type']),
+        floorMat: firstNonEmpty(fv.floorMat, values.Floor_Mat, values['Floor Mat']),
+        paymentMode: firstNonEmpty(fv.paymentMode, p?.paymentMode, values.Payment_Mode, values['Payment Mode']),
+      };
+
+      const forcedRegNo = formatReg(options?.preserveRegNo || "", "");
+      const appliedRegNo = forcedRegNo || formatReg(resolved.regNo || "", "");
       if (applyModeRef.current === "basic") {
-        const fv = p?.formValues || {};
         applyBasicFields({
-          regNo: fv.regNo || "",
-          custMobile: String(fv.custMobile || "").replace(/\D/g, "").slice(-10),
-          custName: fv.custName || "",
-          company: fv.company || "",
-          chassisNo: fv.chassisNo || fv.chassis || "",
-          model: String(fv.model || "").toUpperCase(),
-          colour: fv.colour || "",
+          regNo: appliedRegNo,
+          custMobile: String(resolved.custMobile || "").replace(/\D/g, "").slice(-10),
+          custName: resolved.custName || "",
+          company: resolved.company || "",
+          chassisNo: resolved.chassisNo || "",
+          model: String(resolved.model || "").toUpperCase(),
+          colour: resolved.colour || "",
         });
         return;
       }
-
-      const fv = p?.formValues || {};
-      const serviceType = fv.serviceType || null;
-      const vehicleType = fv.vehicleType || null;
+      const savedAtRaw =
+        p?.savedAt ||
+        p?.createdAt ||
+        p?.ts ||
+        p?.timestamp ||
+        fv.savedAt ||
+        fv.createdAt ||
+        fv.timestamp ||
+        '';
+      const updatedAtRaw = p?.updatedAt || fv.updatedAt || '';
+      const savedAt = (() => {
+        const d = dayjs(savedAtRaw);
+        return d.isValid() ? d.toISOString() : savedAtRaw;
+      })();
+      const updatedAt = (() => {
+        const d = dayjs(updatedAtRaw);
+        return d.isValid() ? d.toISOString() : updatedAtRaw;
+      })();
+      const serviceType = resolved.serviceType || null;
+      const vehicleType = resolved.vehicleType || null;
 
       setServiceTypeLocal?.(serviceType);
       setVehicleTypeLocal?.(vehicleType);
@@ -492,30 +670,33 @@ export default function FetchJobcard({
       const savedDiscount = Number(p?.totals?.labourDisc || 0) || 0;
 
       form.setFieldsValue({
-        jcNo: fv.jcNo || '',
-        branch: fv.branch || undefined,
-        mechanic: fv.mechanic || undefined,
-        executive: fv.executive || undefined,
-        expectedDelivery: fv.expectedDelivery ? dayjs(fv.expectedDelivery, ["DD-MM-YYYY HH:mm","DD-MM-YYYY","DD/MM/YYYY","YYYY-MM-DD", dayjs.ISO_8601], true) : null,
-        regNo: fv.regNo || '',
-        company: String(fv.company || "").toUpperCase(),
-        model: String(fv.model || "").toUpperCase(),
-        colour: fv.colour || '',
-        chassisNo: String(fv.chassisNo || fv.chassis || '').toUpperCase(),
-        km: fv.km ? `${String(fv.km).replace(/\D/g,'')} KM` : '',
-        fuelLevel: fv.fuelLevel || undefined,
-        callStatus: fv.callStatus || '',
-        custName: fv.custName || '',
-        custMobile: String(fv.custMobile || '').replace(/\D/g,'').slice(-10),
-        obs: (fv.obs || '').replace(/\s*#\s*/g, "\n"),
+        jcNo: resolved.jcNo || '',
+        branch: resolved.branch || undefined,
+        mechanic: resolved.mechanic || undefined,
+        executive: resolved.executive || undefined,
+        expectedDelivery: resolved.expectedDelivery ? dayjs(resolved.expectedDelivery, ["DD-MM-YYYY HH:mm","DD-MM-YYYY","DD/MM/YYYY","YYYY-MM-DD", dayjs.ISO_8601], true) : null,
+        regNo: appliedRegNo,
+        company: String(resolved.company || "").toUpperCase(),
+        model: String(resolved.model || "").toUpperCase(),
+        colour: resolved.colour || '',
+        chassisNo: String(resolved.chassisNo || '').toUpperCase(),
+        km: resolved.km ? `${String(resolved.km).replace(/\D/g,'')} KM` : '',
+        fuelLevel: resolved.fuelLevel || undefined,
+        callStatus: resolved.callStatus || '',
+        custName: resolved.custName || '',
+        custMobile: String(resolved.custMobile || '').replace(/\D/g,'').slice(-10),
+        obs: String(resolved.obs || '').replace(/\s*#\s*/g, "\n"),
         vehicleType: vehicleType || undefined,
         serviceType: serviceType || undefined,
-        floorMat: fv.floorMat === 'Yes' ? 'Yes' : fv.floorMat === 'No' ? 'No' : undefined,
+        floorMat: resolved.floorMat === 'Yes' ? 'Yes' : resolved.floorMat === 'No' ? 'No' : undefined,
+        paymentMode: resolved.paymentMode || undefined,
         discounts: { labour: savedDiscount },
         gstLabour: derivedGstPct,
         labourRows: Array.isArray(p?.labourRows) && p.labourRows.length ? p.labourRows : buildRows(serviceType, vehicleType),
+        savedAt: savedAt || undefined,
+        updatedAt: updatedAt || undefined,
       });
-      setRegDisplay?.(fv.regNo || '');
+      setRegDisplay?.(appliedRegNo);
       // Restore follow-up settings if provided in saved payload
       if (p?.followUp) {
         try {
@@ -528,7 +709,7 @@ export default function FetchJobcard({
           if (typeof fu.notes !== 'undefined') setFollowUpNotes?.(String(fu.notes || ''));
         } catch { /* noop */ }
       }
-      updatePostLock(p);
+      updatePostLock(p, values);
       message.success('Details filled from saved Job Card.');
       setOpen(false); setMatches([]); setQuery('');
     } catch (e) {
@@ -589,6 +770,40 @@ export default function FetchJobcard({
     setLoading(true);
     if (isInline) onAutoSearchStatusChange?.(true, source);
     try {
+      if (isInline && (modeNow === "mobile" || modeNow === "vehicle")) {
+        const pickInlineJobcard = async () => {
+          const result = await fetchRows(qNorm, modeNow);
+          if (!result || !Array.isArray(result.rows) || !result.rows.length) return null;
+          const payloads = result.rows.map((r) => r?.payload || r).filter(Boolean);
+          if (!payloads.length) return null;
+          const sorted = [...payloads].sort((a, b) => payloadTimestampMs(b) - payloadTimestampMs(a));
+          return { type: "jobcard", data: sorted[0] };
+        };
+        const pickInlineBooking = async () => {
+          const rows = await fetchBookingRowsInline(qNorm, modeNow);
+          if (!rows.length) return null;
+          const sorted = [...rows].sort((a, b) => bookingRowTsMs(b) - bookingRowTsMs(a));
+          return { type: "booking", data: sorted[0] };
+        };
+        const raceWrap = (fn) =>
+          fn().then((r) => (r ? r : Promise.reject(new Error("empty"))));
+        let winner = null;
+        try {
+          winner = await Promise.any([raceWrap(pickInlineJobcard), raceWrap(pickInlineBooking)]);
+        } catch {
+          winner = null;
+        }
+        const inlineRegOverride = modeNow === "vehicle" ? qNorm : "";
+        if (winner?.type === "jobcard") {
+          applyPayloadToForm(winner.data, { preserveRegNo: inlineRegOverride });
+          return;
+        }
+        if (winner?.type === "booking") {
+          applyBookingRowToForm(winner.data, { preserveRegNo: inlineRegOverride });
+          return;
+        }
+      }
+
       const result = await fetchRows(qNorm, modeNow);
       if (!result) throw new Error('No result');
       if (result.mode === 'webhook') {

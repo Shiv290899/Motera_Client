@@ -25,7 +25,7 @@ export default function Gallery() {
     <div style={container}>
       <Title level={2} style={{ marginTop: 0 }}>Gallery</Title>
       <Paragraph type="secondary" style={{ marginBottom: 16 }}>
-        A few photos from our showrooms and service bays.
+        A few photos from our service bays and workshop floor.
       </Paragraph>
 
       <Image.PreviewGroup>
@@ -48,4 +48,3 @@ export default function Gallery() {
     </div>
   );
 }
-

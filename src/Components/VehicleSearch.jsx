@@ -9,6 +9,7 @@ import {
   Empty,
   Input,
   List,
+  Modal,
   Radio,
   Row,
   Space,
@@ -19,6 +20,7 @@ import {
 } from "antd";
 import dayjs from "dayjs";
 import { saveBookingViaWebhook, saveJobcardViaWebhook } from "../apiCalls/forms";
+import { resolveUnifiedGasUrl } from '../utils/ownerConfig';
 import PostServiceSheet from "./PostServiceSheet";
 import { handleSmartPrint } from "../utils/printUtils";
 import { exportToCsv } from "../utils/csvExport";
@@ -26,16 +28,16 @@ import { exportToCsv } from "../utils/csvExport";
 const { Text } = Typography;
 
 const DEFAULT_BOOKING_GAS_URL =
-  "https://script.google.com/macros/s/AKfycbwSn5hp1cSWlJMGhe2cYUtid2Ruqh9H13mZbq0PwBpYB0lMLufZbIjZ5zioqtKgE_0sNA/exec";
+  "https://script.google.com/macros/s/AKfycbz_DoNoD0XTx3RNMOSZfypbMqWVN4yTy3ct96aE4LhJ9yb_YvKr0GRbO_GA3Fgkwptb/exec?module=booking";
 const DEFAULT_JOBCARD_GAS_URL =
-  "https://script.google.com/macros/s/AKfycbw7DzKCy3wZeeRBEM5XKIu6w0gt_2ouCaSkpaKv0UkjkQThCtVoRciOkkYT8sNViQuEaw/exec";
+  "https://script.google.com/macros/s/AKfycbz_DoNoD0XTx3RNMOSZfypbMqWVN4yTy3ct96aE4LhJ9yb_YvKr0GRbO_GA3Fgkwptb/exec?module=jobcard";
 const GAS_SECRET = import.meta.env.VITE_JOBCARD_GAS_SECRET || "";
 const BOOKING_SECRET = import.meta.env.VITE_BOOKING_GAS_SECRET || "";
 
-const BOOKING_GAS_URL =
-  import.meta.env.VITE_BOOKING_GAS_URL || DEFAULT_BOOKING_GAS_URL;
-const JOBCARD_GAS_URL =
-  import.meta.env.VITE_JOBCARD_GAS_URL || DEFAULT_JOBCARD_GAS_URL;
+const getBookingGasUrl = () =>
+  resolveUnifiedGasUrl('booking', import.meta.env.VITE_BOOKING_GAS_URL || DEFAULT_BOOKING_GAS_URL);
+const getJobcardGasUrl = () =>
+  resolveUnifiedGasUrl('jobcard', import.meta.env.VITE_JOBCARD_GAS_URL || DEFAULT_JOBCARD_GAS_URL);
 
 const ordinal = (n) => {
   const s = ["th", "st", "nd", "rd"];
@@ -59,16 +61,8 @@ const isVehiclePartial = (val) => {
   return stages.some((rx) => rx.test(v));
 };
 
-// Optional mechanic contacts (best-effort; show only if known)
-const MECHANIC_CONTACTS = {
-  SONU: "7033558306",
-  KARTHIK: "7338386813",
-  MANMOHAN: "9956079799",
-  MANSUR: "7795047627",
-  IRSHAD: "6207176821",
-  DAKSHAT: "7829096931",
-  SALMAN: "7892335161",
-};
+// Optional mechanic contacts (disabled)
+const MECHANIC_CONTACTS = {};
 
 const getMechanicContact = (name) => {
   const key = String(name || "").trim();
@@ -90,54 +84,41 @@ const parseBookingRow = (row) => {
   const v = p.vehicle || {};
   const mobile = normalizeMobile(p.mobileNumber || p.mobile || "");
   const when = parseDate(p.ts || p.createdAt);
-  const attachments =
-    (Array.isArray(p.attachments) ? p.attachments : []) ||
-    (Array.isArray(p.files) ? p.files : []);
-  const pickByName = (needle) => {
-    const n = String(needle || "").toLowerCase();
-    const hit = attachments.find((a) =>
-      String(a?.name || "").toLowerCase().includes(n)
-    );
-    return hit?.url || hit?.fileId || null;
-  };
+  const attachments = [
+    ...(Array.isArray(p.attachments) ? p.attachments : []),
+    ...(Array.isArray(p.files) ? p.files : []),
+  ];
   const pickDirect = (obj, keys) =>
     keys
       .map((k) => obj?.[k])
       .find((v) => v != null && String(v).trim() !== "");
 
-  let invoiceUrl =
+  const invoiceUrl =
     p.invoiceFileUrl ||
     row?.invoiceFileUrl ||
-    p.invoiceUrl ||
-    p.invoiceLink ||
-    pickDirect(vTop, ["Invoice File URL", "Invoice", "InvoiceFileUrl", "InvoiceFileURL"]) ||
-    pickDirect(p, ["Invoice File URL", "Invoice", "InvoiceFileUrl", "InvoiceFileURL"]) ||
+    pickDirect(vTop, ["Invoice File URL", "Invoice_File_URL", "invoiceFileUrl", "invoice_file_url"]) ||
+    pickDirect(p, ["Invoice File URL", "Invoice_File_URL", "invoiceFileUrl", "invoice_file_url"]) ||
     vTop?.invoiceFileUrl ||
-    vTop?.invoiceUrl ||
-    vTop?.invoiceLink ||
     vTop?.["Invoice File URL"] ||
-    vTop?.["Invoice"] ||
     p["Invoice File URL"] ||
-    p["Invoice"] ||
-    pickByName("invoice") ||
     null;
-  let insuranceUrl =
+  const insuranceUrl =
     p.insuranceFileUrl ||
     row?.insuranceFileUrl ||
-    p.insuranceUrl ||
-    p.insuranceLink ||
+    pickDirect(vTop, ["Insurance File URL", "Insurance_File_URL", "insuranceFileUrl", "insurance_file_url"]) ||
+    pickDirect(p, ["Insurance File URL", "Insurance_File_URL", "insuranceFileUrl", "insurance_file_url"]) ||
     vTop?.insuranceFileUrl ||
-    vTop?.insuranceUrl ||
-    vTop?.insuranceLink ||
     vTop?.["Insurance File URL"] ||
-    vTop?.["Insurance"] ||
     p["Insurance File URL"] ||
-    p["Insurance"] ||
-    pickByName("insurance") ||
     null;
-  // Fallback to attachments when explicit URLs missing
-  if (!invoiceUrl && attachments?.length) invoiceUrl = attachments[0]?.url || attachments[0]?.fileId || invoiceUrl;
-  if (!insuranceUrl && attachments?.length > 1) insuranceUrl = attachments[1]?.url || attachments[1]?.fileId || insuranceUrl;
+  const docsUrl =
+    attachments?.[0]?.url ||
+    attachments?.[0]?.fileId ||
+    p.file?.url ||
+    p.file?.fileId ||
+    vTop?.file?.url ||
+    vTop?.file?.fileId ||
+    null;
   const billLink =
     invoiceUrl ||
     p.bookingSheetUrl ||
@@ -162,6 +143,7 @@ const parseBookingRow = (row) => {
     billLink,
     invoiceUrl,
     insuranceUrl,
+    docsUrl,
   };
 };
 
@@ -184,7 +166,23 @@ const parseJobRow = (row) => {
       p["Mobile"] ||
       ""
   );
+  const postServiceAt =
+    p.postServiceAt ||
+    p.postService_at ||
+    p.Post_Service_At ||
+    p["Post Service At"] ||
+    p["Post_Service_At"] ||
+    fv.postServiceAt ||
+    fv.postService_at ||
+    fv["Post Service At"] ||
+    root.postServiceAt ||
+    root.postService_at ||
+    root.Post_Service_At ||
+    root["Post Service At"] ||
+    root["Post_Service_At"] ||
+    "";
   const ts =
+    postServiceAt ||
     p.ts ||
     p.timestamp ||
     p.createdAt ||
@@ -290,6 +288,8 @@ const parseJobRow = (row) => {
 };
 
 export default function VehicleSearch() {
+  const BOOKING_GAS_URL = getBookingGasUrl();
+  const JOBCARD_GAS_URL = getJobcardGasUrl();
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
   const navigate = useNavigate();
@@ -298,10 +298,14 @@ export default function VehicleSearch() {
   const [loading, setLoading] = useState(false);
   const [bookings, setBookings] = useState([]);
   const [services, setServices] = useState([]);
+  const [bookingLoading, setBookingLoading] = useState(false);
+  const [serviceLoading, setServiceLoading] = useState(false);
   const [error, setError] = useState("");
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [invoiceData, setInvoiceData] = useState(null);
+  const [docPreview, setDocPreview] = useState({ open: false, title: "", url: "", mobile: "" });
   const invoiceRef = useRef(null);
+  const searchSeqRef = useRef(0);
 
   const mainBooking = bookings[0] || null;
   const serviceTimeline = useMemo(() => {
@@ -374,11 +378,17 @@ export default function VehicleSearch() {
       }
       q = reg;
     }
+    const searchSeq = ++searchSeqRef.current;
+    const isActiveSearch = () => searchSeqRef.current === searchSeq;
     setLoading(true);
+    setBookingLoading(true);
+    setServiceLoading(true);
+    setBookings([]);
+    setServices([]);
     setError("");
     try {
-      const nextBookings = [];
-      const nextServices = [];
+      let nextBookings = [];
+      let nextServices = [];
       const searchQuery = mode === "mobile" ? normalizeMobile(q) || q : normalizeReg(q);
       const fetchBookings = async (payload, method = "GET") => {
         const resp = await saveBookingViaWebhook({
@@ -389,100 +399,131 @@ export default function VehicleSearch() {
         const js = resp?.data || resp;
         return Array.isArray(js?.rows) ? js.rows : [];
       };
+      const fetchJobRows = async (payload, method = "GET") => {
+        const resp = await saveJobcardViaWebhook({
+          webhookUrl: JOBCARD_GAS_URL,
+          method,
+          payload,
+        });
+        const js = resp?.data || resp;
+        return Array.isArray(js?.rows) ? js.rows : [];
+      };
 
-      const bookingPromise = (async () => {
-        if (!BOOKING_GAS_URL) return;
-        if (!(mode === "mobile" || isMobileLike(q) || q.toUpperCase().startsWith("BK-") || mode === "vehicle")) return;
-        const payload = (() => {
-          if (q.toUpperCase().startsWith("BK-")) return { action: "search", mode: "booking", query: q.toUpperCase() };
-          if (mode === "vehicle" && !isMobileLike(q)) return { action: "search", mode: "vehicle", query: normalizeReg(q) };
-          return { action: "search", mode: "mobile", query: normalizeMobile(q) || q };
-        })();
-        if (BOOKING_SECRET) payload.secret = BOOKING_SECRET;
-        try {
-          const rows = await fetchBookings(payload, "GET");
-          rows.forEach((r) => nextBookings.push(parseBookingRow(r)));
-        } catch (e) {
-          console.warn("Booking search failed", e);
+      const bookingTasks = [];
+      const serviceTasks = [];
+      let bookingPending = 0;
+      let servicePending = 0;
+
+      const applyBookings = (rows) => {
+        const parsed = (rows || []).map((r) => parseBookingRow(r));
+        if (!parsed.length) return;
+        // Keep the most complete result set if multiple async calls return.
+        if (!nextBookings.length || parsed.length >= nextBookings.length) {
+          nextBookings = parsed;
+          if (isActiveSearch()) setBookings(parsed);
         }
-      })();
+        if (isActiveSearch()) setBookingLoading(false);
+      };
 
-      const servicesPromise = (async () => {
-        if (!JOBCARD_GAS_URL) return;
-        let foundHistory = false;
-        try {
-          const hist = await fetchServiceHistory(searchQuery);
-          if (hist.length) {
-            hist.forEach((r) => nextServices.push(parseJobRow(r)));
-            foundHistory = true;
-          }
-        } catch (e) {
-          console.warn("History lookup failed", e);
+      const applyServices = (rows) => {
+        const parsed = (rows || []).map((r) => parseJobRow(r));
+        if (!parsed.length) return;
+        if (!nextServices.length || parsed.length >= nextServices.length) {
+          nextServices = parsed;
+          if (isActiveSearch()) setServices(parsed);
         }
+        if (isActiveSearch()) setServiceLoading(false);
+      };
 
-        if (foundHistory) return;
-        const jobModes = mode === "vehicle" && !isMobileLike(q) ? ["reg", "vehicle"] : ["mobile", "reg"];
-        for (const m of jobModes) {
-          try {
-            const payload = { action: "search", mode: m, query: searchQuery };
-            if (GAS_SECRET) payload.secret = GAS_SECRET;
-            let resp = await saveJobcardViaWebhook({
-              webhookUrl: JOBCARD_GAS_URL,
-              method: "GET",
-              payload,
-            });
-            let js = resp?.data || resp;
-            let rows = Array.isArray(js?.rows) ? js.rows : [];
-            if (!rows.length) {
-              resp = await saveJobcardViaWebhook({
-                webhookUrl: JOBCARD_GAS_URL,
-                method: "POST",
-                payload,
-              });
-              js = resp?.data || resp;
-              rows = Array.isArray(js?.rows) ? js.rows : [];
-            }
-            if (rows.length) {
-              rows.forEach((r) => nextServices.push(parseJobRow(r)));
-              return;
-            }
-          } catch (e) {
-            console.warn("Jobcard search failed", e);
-          }
-        }
-        if (mode === "mobile" && !isMobileLike(q)) {
-          setError("No matching job cards found. Try vehicle number search.");
-        }
-      })();
+      const queueBooking = (payload, method, label) => {
+        bookingPending += 1;
+        bookingTasks.push(
+          fetchBookings(payload, method)
+            .then((rows) => applyBookings(rows))
+            .catch((e) => console.warn(`Booking ${label} failed`, e))
+            .finally(() => {
+              bookingPending -= 1;
+              if (bookingPending === 0 && isActiveSearch()) setBookingLoading(false);
+            })
+        );
+      };
 
-      await Promise.allSettled([bookingPromise, servicesPromise]);
+      const queueService = (payload, method, label) => {
+        servicePending += 1;
+        serviceTasks.push(
+          fetchJobRows(payload, method)
+            .then((rows) => applyServices(rows))
+            .catch((e) => console.warn(`Service ${label} failed`, e))
+            .finally(() => {
+              servicePending -= 1;
+              if (servicePending === 0 && isActiveSearch()) setServiceLoading(false);
+            })
+        );
+      };
 
-      // Fallback: if no bookings from vehicle search, but we have service rows with a mobile, fetch bookings by that mobile
-      if (!nextBookings.length && mode === "vehicle" && BOOKING_GAS_URL && nextServices.length) {
-        const m = normalizeMobile(nextServices[0]?.mobile || nextServices[0]?.custMobile || "");
-        if (m.length === 10) {
+      // Fire booking webhook variants in parallel.
+      if (BOOKING_GAS_URL) {
+        if (q.toUpperCase().startsWith("BK-")) {
+          const payload = BOOKING_SECRET
+            ? { action: "search", mode: "booking", query: q.toUpperCase(), secret: BOOKING_SECRET }
+            : { action: "search", mode: "booking", query: q.toUpperCase() };
+          queueBooking(payload, "GET", "booking GET");
+          queueBooking(payload, "POST", "booking POST");
+        } else if (mode === "vehicle" && !isMobileLike(q)) {
+          const regQuery = normalizeReg(q);
+          const payloadVehicle = BOOKING_SECRET
+            ? { action: "search", mode: "vehicle", query: regQuery, secret: BOOKING_SECRET }
+            : { action: "search", mode: "vehicle", query: regQuery };
+          const payloadReg = BOOKING_SECRET
+            ? { action: "search", mode: "reg", query: regQuery, secret: BOOKING_SECRET }
+            : { action: "search", mode: "reg", query: regQuery };
+          queueBooking(payloadVehicle, "GET", "vehicle GET");
+          queueBooking(payloadVehicle, "POST", "vehicle POST");
+          queueBooking(payloadReg, "GET", "reg GET");
+          queueBooking(payloadReg, "POST", "reg POST");
+        } else {
+          const mobileQuery = normalizeMobile(q) || q;
           const payloadMobile = BOOKING_SECRET
-            ? { action: "search", mode: "mobile", query: m, secret: BOOKING_SECRET }
-            : { action: "search", mode: "mobile", query: m };
-          try {
-            let rows = await fetchBookings(payloadMobile, "GET");
-            if (!rows.length) {
-              rows = await fetchBookings(payloadMobile, "POST").catch(() => []);
-            }
-            rows.forEach((r) => nextBookings.push(parseBookingRow(r)));
-          } catch (e) {
-            console.warn("Fallback booking-by-mobile failed", e);
-          }
+            ? { action: "search", mode: "mobile", query: mobileQuery, secret: BOOKING_SECRET }
+            : { action: "search", mode: "mobile", query: mobileQuery };
+          queueBooking(payloadMobile, "GET", "mobile GET");
+          queueBooking(payloadMobile, "POST", "mobile POST");
         }
+      } else if (isActiveSearch()) {
+        setBookingLoading(false);
       }
 
-      setBookings(nextBookings);
-      setServices(nextServices);
-      if (!nextBookings.length && !nextServices.length) {
+      // Fire service history + search mode variants in parallel.
+      if (JOBCARD_GAS_URL) {
+        const historyPayload = GAS_SECRET
+          ? { action: "getServiceHistory", query: searchQuery, mode, secret: GAS_SECRET }
+          : { action: "getServiceHistory", query: searchQuery, mode };
+        queueService(historyPayload, "GET", "history GET");
+        queueService(historyPayload, "POST", "history POST");
+
+        const jobModes = mode === "vehicle" && !isMobileLike(q) ? ["reg", "vehicle"] : ["mobile", "reg"];
+        jobModes.forEach((m) => {
+          const payload = GAS_SECRET
+            ? { action: "search", mode: m, query: searchQuery, secret: GAS_SECRET }
+            : { action: "search", mode: m, query: searchQuery };
+          queueService(payload, "GET", `search ${m} GET`);
+          queueService(payload, "POST", `search ${m} POST`);
+        });
+      } else if (isActiveSearch()) {
+        setServiceLoading(false);
+      }
+
+      await Promise.allSettled([...bookingTasks, ...serviceTasks]);
+
+      if (isActiveSearch() && !nextBookings.length && !nextServices.length) {
         setError("No records found. Check the number and try again.");
       }
     } finally {
-      setLoading(false);
+      if (isActiveSearch()) {
+        setLoading(false);
+        setBookingLoading(false);
+        setServiceLoading(false);
+      }
     }
   };
 
@@ -643,6 +684,82 @@ export default function VehicleSearch() {
     message.success(`Exported ${rowsForCsv.length} records`);
   };
 
+  const openDocPreview = (title, url, mobile = "") => {
+    const safeUrl = String(url || "").trim();
+    if (!safeUrl) return;
+    setDocPreview({ open: true, title: title || "Preview", url: safeUrl, mobile: String(mobile || "") });
+  };
+
+  const handlePreviewPrint = () => {
+    const url = String(docPreview?.url || "").trim();
+    if (!url) return;
+    try {
+      const frame = document.getElementById("vehicle-search-doc-preview-frame");
+      if (frame?.contentWindow) {
+        frame.contentWindow.focus();
+        frame.contentWindow.print();
+        return;
+      }
+    } catch {
+      // Fallback below for cross-origin iframe restrictions.
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const handlePreviewDownload = () => {
+    const url = String(docPreview?.url || "").trim();
+    if (!url) return;
+    const a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noreferrer";
+    a.download = "";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const handlePreviewCopyLink = async () => {
+    const url = String(docPreview?.url || "").trim();
+    if (!url) return;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = url;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
+      message.success("Link copied");
+    } catch {
+      message.error("Could not copy link");
+    }
+  };
+
+  const getWhatsAppPhone = (mobileRaw) => {
+    const digits = String(mobileRaw || "").replace(/\D/g, "");
+    if (!digits) return "";
+    if (digits.length === 10) return `91${digits}`;
+    if (digits.length === 12 && digits.startsWith("91")) return digits;
+    return digits;
+  };
+
+  const handlePreviewWhatsApp = () => {
+    const url = String(docPreview?.url || "").trim();
+    if (!url) return;
+    const phone = getWhatsAppPhone(docPreview?.mobile || mainBooking?.mobile || query);
+    if (!phone) {
+      message.warning("Customer mobile number not available for WhatsApp share.");
+      return;
+    }
+    const text = `${docPreview?.title || "File"}: ${url}`;
+    const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+    window.open(waUrl, "_blank", "noopener,noreferrer");
+  };
+
   return (
     <>
     <div
@@ -773,7 +890,7 @@ export default function VehicleSearch() {
             }
             extra={
               <Tag color={bookings.length ? "green" : "default"}>
-                {bookings.length ? `${bookings.length} found` : "None"}
+                {bookingLoading ? "Searching..." : bookings.length ? `${bookings.length} found` : "None"}
               </Tag>
             }
             style={{
@@ -808,9 +925,7 @@ export default function VehicleSearch() {
                     <Button
                       size="small"
                       type="default"
-                      href={mainBooking.invoiceUrl}
-                      target="_blank"
-                      rel="noreferrer"
+                      onClick={() => openDocPreview("Invoice Preview", mainBooking.invoiceUrl, mainBooking.mobile)}
                     >
                       Invoice
                     </Button>
@@ -819,11 +934,18 @@ export default function VehicleSearch() {
                     <Button
                       size="small"
                       type="default"
-                      href={mainBooking.insuranceUrl}
-                      target="_blank"
-                      rel="noreferrer"
+                      onClick={() => openDocPreview("Insurance Preview", mainBooking.insuranceUrl, mainBooking.mobile)}
                     >
                       Insurance
+                    </Button>
+                  ) : null}
+                  {mainBooking.docsUrl ? (
+                    <Button
+                      size="small"
+                      type="default"
+                      onClick={() => openDocPreview("Docs Preview", mainBooking.docsUrl, mainBooking.mobile)}
+                    >
+                      Docs
                     </Button>
                   ) : null}
                 </Space>
@@ -864,7 +986,7 @@ export default function VehicleSearch() {
                   New Jobcard
                 </Button>
                 <Tag color={services.length ? "blue" : "default"}>
-                  {services.length ? `${services.length} found` : "None"}
+                  {serviceLoading ? "Searching..." : services.length ? `${services.length} found` : "None"}
                 </Tag>
               </Space>
             }
@@ -968,6 +1090,43 @@ export default function VehicleSearch() {
         vals={invoiceData?.vals || {}}
         totals={invoiceData?.totals || {}}
       />
+
+      <Modal
+        open={docPreview.open}
+        title={docPreview.title || "Preview"}
+        width={isMobile ? "96vw" : 980}
+        onCancel={() => setDocPreview({ open: false, title: "", url: "", mobile: "" })}
+        destroyOnClose
+        footer={[
+          <Button key="whatsapp" type="primary" onClick={handlePreviewWhatsApp}>
+            WhatsApp
+          </Button>,
+          <Button key="print" onClick={handlePreviewPrint}>
+            Print
+          </Button>,
+          <Button key="download" onClick={handlePreviewDownload}>
+            Download
+          </Button>,
+          <Button key="copy" onClick={handlePreviewCopyLink}>
+            Copy Link
+          </Button>,
+          <Button key="newtab" type="default" href={docPreview.url} target="_blank" rel="noreferrer">
+            Open in new tab
+          </Button>,
+          <Button key="close" onClick={() => setDocPreview({ open: false, title: "", url: "", mobile: "" })}>
+            Close
+          </Button>,
+        ]}
+      >
+        {docPreview.url ? (
+          <iframe
+            id="vehicle-search-doc-preview-frame"
+            title={docPreview.title || "File preview"}
+            src={docPreview.url}
+            style={{ width: "100%", height: isMobile ? "70vh" : "72vh", border: "1px solid #e5e7eb", borderRadius: 8 }}
+          />
+        ) : null}
+      </Modal>
     </>
   );
 }

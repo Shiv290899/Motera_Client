@@ -1,7 +1,7 @@
 import React from "react";
 import { Tabs, Grid } from "antd";
-import Branches from "./Branches";
 import StockUpdate from "../StockUpdate";
+import Branches from "./Branches";
 import InStockUpdate from "../InStockUpdate";
 import Users from "./Users";
 import Bookings from "../Bookings";
@@ -38,7 +38,7 @@ export default function Admin() {
     // 6) Branches, 7) Users, 8) Announcements
     { key: "branches", label: "Branches", children: <Branches /> },
     { key: "users", label: "Users", children: <Users /> },
-    { key: 'vehiclecatalog', label: 'Vehicle Catalog', children: <VehicleCatalogManager csvFallbackUrl={import.meta.env.VITE_VEHICLE_SHEET_CSV_URL || "https://docs.google.com/spreadsheets/d/e/2PACX-1vQYGuNPY_2ivfS7MTX4bWiu1DWdF2mrHSCnmTznZVEHxNmsrgcGWjVZN4UDUTOzQQdXTnbeM-ylCJbB/pub?gid=408799621&single=true&output=csv"} /> },
+    { key: 'vehiclecatalog', label: 'Vehicle Catalog', children: <VehicleCatalogManager /> },
     { key: "announcements", label: (<><style>{`@keyframes annPulse{0%{transform:scale(1);}60%{transform:scale(1.05);}100%{transform:scale(1);}}`}</style><span>Announcements<NewPill/></span></>), children: <Announcements /> },
     // 9) Analytics & Reports, 10) Branch-level Sales, 11) Multi-branch Compare, 12) Sales Performance
     { key: "analytics", label: "Analytics", children: <Analytics /> },

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Table, Space, Button, Select, message, Segmented, Grid, Modal, Form, Input, InputNumber, Divider, Typography } from 'antd';
 
 import { saveJobcardViaWebhook } from '../apiCalls/forms';
+import { resolveUnifiedGasUrl } from '../utils/ownerConfig';
 import { listUsersPublic } from '../apiCalls/adminUsers';
 import { exportToCsv } from '../utils/csvExport';
 
@@ -10,8 +11,8 @@ const { Text } = Typography;
 export default function AdminDailyCollections() {
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
-  const DEFAULT_JC_URL = 'https://script.google.com/macros/s/AKfycbw7DzKCy3wZeeRBEM5XKIu6w0gt_2ouCaSkpaKv0UkjkQThCtVoRciOkkYT8sNViQuEaw/exec';
-  const GAS_URL = import.meta.env.VITE_JOBCARD_GAS_URL || DEFAULT_JC_URL;
+  const DEFAULT_JC_URL = 'https://script.google.com/macros/s/AKfycbz_DoNoD0XTx3RNMOSZfypbMqWVN4yTy3ct96aE4LhJ9yb_YvKr0GRbO_GA3Fgkwptb/exec?module=jobcard';
+  const GAS_URL = resolveUnifiedGasUrl('jobcard', import.meta.env.VITE_JOBCARD_GAS_URL || DEFAULT_JC_URL);
   const SECRET = import.meta.env.VITE_JOBCARD_GAS_SECRET || '';
   const readUser = () => { try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; } };
   const me = useMemo(() => readUser(), []);

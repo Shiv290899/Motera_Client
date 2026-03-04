@@ -1,5 +1,13 @@
 // components/PostServiceSheet.jsx
 import React, { useMemo, forwardRef } from "react";
+import {
+  getOwnerOrgName,
+  getOwnerOrgNameRegional,
+  getOwnerOrgAddress,
+  getOwnerOrgMobiles,
+  getOwnerLogoUrl,
+  getOwnerLocationQrUrl,
+} from "../utils/ownerConfig";
 import { inr, fmtDate, amountInWords } from "../utils/printUtils";
 
 /**
@@ -9,6 +17,12 @@ import { inr, fmtDate, amountInWords } from "../utils/printUtils";
  * - Scopes print to the active sheet to avoid blank/extra pages
  */
 const PostServiceSheet = forwardRef(function PostServiceSheet({ active, vals, totals }, ref) {
+  const orgName = getOwnerOrgName() || "Motera";
+  const orgNameRegional = getOwnerOrgNameRegional();
+  const orgAddress = getOwnerOrgAddress();
+  const orgMobiles = getOwnerOrgMobiles();
+  const logoUrl = getOwnerLogoUrl() || "";
+  const locationQrUrl = getOwnerLocationQrUrl() || "/location-qr.png";
   const rows = Array.isArray(vals?.labourRows) ? vals.labourRows : [];
   const items = rows.map((r, idx) => ({
     sn: idx + 1,
@@ -34,7 +48,7 @@ const PostServiceSheet = forwardRef(function PostServiceSheet({ active, vals, to
   const kmVal = parseKm(vals?.km);
   const nextServiceKm = kmVal != null ? kmVal + 2000 : null;
   const branch = String(vals?.branch || "").trim();
-  const isNH = branch.toLowerCase().includes("byadarahalli"); // Switch branding for Byadarahalli (tolerant casing/phrasing)
+  const isNH = false;
   const mobileDigits = useMemo(() => {
     const d = String(vals?.custMobile || "").replace(/\D/g, "").slice(-10);
     return d || "";
@@ -95,34 +109,50 @@ img { max-width: 100%; height: auto; background: transparent; }
   width: max-content;
   margin: 4mm auto 0;
   text-align: center;
-  font-size: 20pt;
-  font-weight: 700;
+  font-size: 21pt;
+  font-weight: 800;
   letter-spacing: 0.8px;
+  color: #000;
+  background: #fff;
 }
 
 /* Provide inner page padding instead of @page margins (more consistent on Android) */
-.post-a4 { display: block; }
-.bill-wrap { padding: 8mm; color: #000; }
-.bill-box { border: 1px solid #000; border-radius: 1mm; padding: 3mm; }
+.print-sheet,
+.print-sheet *,
+.post-a4,
+.bill-wrap,
+.bill-box {
+  color: #000 !important;
+}
+.post-a4 { display: block; background: #fff !important; }
+.bill-wrap { padding: 8mm; color: #000; background: #fff !important; }
+.bill-box { border: 1px solid #000; border-radius: 1mm; padding: 3mm; background: #fff !important; }
 
-.hdr-grid { display: grid; grid-template-columns: 28mm 1fr 28mm; align-items: center; gap: 3mm; }
+.hdr-grid { display: grid; grid-template-columns: 36mm 1fr 36mm; align-items: center; gap: 4mm; }
 .shop-title { text-align: center; }
-.shop-title .en { font-size: 18pt; font-weight: 500; line-height: 1.05; }
-.shop-sub { font-size: 10pt; margin-top: 1mm; }
+.shop-title .en { font-size: 9.8mm; font-weight: 600; line-height: 1.08; }
+.shop-title .sub-line { font-size: 10.5pt; margin-top: 1.5mm; }
+.shop-title .mob-line { font-size: 10.5pt; margin-top: 1mm; }
+.shop-title .addr-line { font-size: 8.8pt; margin-top: 1mm; line-height: 1.2; }
+.logo-box { width: 34mm; height: 34mm; display: flex; align-items: center; justify-content: center; margin: 0 auto; }
+.qr-wrap { width: 34mm; margin: 0 auto; text-align: left; }
+.qr-box { width: 34mm; height: 34mm; display: flex; align-items: center; justify-content: center; }
+.qr-label { margin-top: 1mm; font-size: 10pt; font-weight: 700; line-height: 1.1; }
 
 .id-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2mm; margin-top: 3mm; }
 .label { font-weight: 600; }
 
 .tbl { width: 100%; border-collapse: collapse; margin-top: 3mm; }
 .tbl th, .tbl td { border: 1px solid #111; padding: 1.8mm; font-size: 11pt; }
-.tbl th { font-weight: 700; text-align: center; }
+.tbl th { font-weight: 700; text-align: center; background: #fff !important; color: #000 !important; }
+.tbl td { background: #fff !important; color: #000 !important; }
 .right { text-align: right; }
 .center { text-align: center; }
 .tiny { font-size: 10px; }
 
   .totals { display: grid; grid-template-columns: 1fr 70mm; gap: 3mm; margin-top: 4mm; }
   /* Compact single box for all totals */
-  .sum-box { border: 1px solid #111; border-radius: 2mm; overflow: hidden; }
+  .sum-box { border: 1px solid #111; border-radius: 2mm; overflow: hidden; background: #fff !important; }
   .sum-row { display: grid; grid-template-columns: 1fr 1fr; align-items: center; }
   .sum-row > div { padding: 2mm 2.5mm; font-size: 11pt; line-height: 1.25; }
   .sum-row .label { font-weight: 600; border-right: 1px solid #111; }
@@ -144,33 +174,35 @@ img { max-width: 100%; height: auto; background: transparent; }
         <div className="bill-wrap">
           <div className="bill-box">
             <div className="hdr-grid">
-              <img
-                src={isNH ? "/honda-logo.png" : "/shantha-logoprint.jpg"}
-                alt={isNH ? "NH Motors" : "Shantha Motors"}
-                style={{ width: "100%", maxHeight: 100 }}
-              />
-              <div className="shop-title">
-                {isNH ? (
-                  <>
-                    <div className="en">NH Motors | ಎನ್ ಎಚ್ ಮೋಟರ್ಸ್</div>
-                    <div className="shop-sub" style={{ marginTop: 4 }}>
-                      Site No. 116/1, Bydarahalli, Magadi Main Road, Opp.<br />
-                      HP Petrol Bunk, Bangalore - 560091
-                    </div>
-                    <div className="shop-sub">Mob: 9731366921 / 8073283502 / 9741609799</div>
-                  </>
-                ) : (
-                  <>
-                    <div className="en">SHANTHA MOTORS | ಶಾಂತ ಮೋಟರ್ಸ್</div>
-                    <div className="shop-sub">Multi Brand Two Wheeler Sales &amp; Service</div>
-                    <div className="shop-sub">Mob No : 9731366921 / 8073283502 </div>
-                    <div className="tiny">Kadabagere • Muddinapalya  • Andrahalli • Tavarekere • Hegganahalli • Channenahalli • Nelagadrahalli</div>
-                  </>
-                )}
+              <div className="logo-box">
+                {logoUrl ? (
+                  <img
+                    src={logoUrl}
+                    alt={orgName}
+                    style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                  />
+                ) : null}
               </div>
-              <div>
-                <img src="/location-qr.png" alt="Location QR" style={{ width: "100%", maxHeight: 100 }} />
-                <div style={{ fontSize: 13, fontWeight: 600, marginTop: 4 }}>Scan for Location</div>
+              <div className="shop-title">
+                <div className="en">
+                  {orgName}
+                  {orgNameRegional ? ` | ${orgNameRegional}` : ""}
+                </div>
+                <div className="sub-line">Multi Brand Two Wheeler Sales &amp; Service</div>
+                {orgMobiles?.length ? (
+                  <div className="mob-line">Mob No : {orgMobiles.join(" / ")}</div>
+                ) : null}
+                {orgAddress ? <div className="addr-line">{orgAddress}</div> : null}
+              </div>
+              <div className="qr-wrap">
+                <div className="qr-box">
+                  <img
+                    src={locationQrUrl}
+                    alt="Location QR"
+                    style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                  />
+                </div>
+                <div className="qr-label">Scan for<br />Location</div>
               </div>
             </div>
 
@@ -258,7 +290,7 @@ img { max-width: 100%; height: auto; background: transparent; }
             <div className="sign-row">
               <div />
               <div className="sign-box tiny">
-                {isNH ? "For NH Motors" : "For Shantha Motors"}<br/>Authorised Signatory
+                For {orgName}<br/>Authorised Signatory
               </div>
             </div>
 

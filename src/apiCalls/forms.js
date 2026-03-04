@@ -1,4 +1,5 @@
 import { axiosInstance } from "./index";
+import { resolveWebhookUrl } from '../utils/ownerConfig';
 
 export const saveQuotationForm = async (payload) => {
   const { data } = await axiosInstance.post("/forms/quotation", payload);
@@ -34,13 +35,19 @@ export const saveBookingForm = async (payload) => {
 };
 
 export const saveBookingViaWebhook = async ({ webhookUrl, payload, headers, method }) => {
-  const { data } = await axiosInstance.post("/forms/booking/webhook", { webhookUrl, payload, headers, method }, { timeout: 60000 });
+  const url = resolveWebhookUrl(webhookUrl);
+  const { data } = await axiosInstance.post("/forms/booking/webhook", { webhookUrl: url, payload, headers, method }, { timeout: 60000 });
   return data;
 };
 
 // Jobcard-specific webhook proxy (separate from booking for clarity)
 export const saveJobcardViaWebhook = async ({ webhookUrl, payload, headers, method }) => {
-  const { data } = await axiosInstance.post("/forms/jobcard/webhook", { webhookUrl, payload, headers, method });
+  const url = resolveWebhookUrl(webhookUrl);
+  const { data } = await axiosInstance.post(
+    "/forms/jobcard/webhook",
+    { webhookUrl: url, payload, headers, method },
+    { timeout: 60000 }
+  );
   return data;
 };
 

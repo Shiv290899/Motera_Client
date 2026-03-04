@@ -10,13 +10,20 @@ export default function BookingInlineModal({ open, onClose, row, webhookUrl }) {
 
   const toNumber = (x) => Number(String(x ?? 0).replace(/[₹,\s]/g, '')) || 0;
 
-  const normalizeFromPayload = (p = {}) => {
+  const normalizeFromPayload = (source = {}) => {
+    const payload = source?.payload && typeof source.payload === 'object' ? source.payload : source;
+    const values = source?.values && typeof source.values === 'object' ? source.values : {};
+    const p = payload || {};
     const v = p.vehicle || {};
-    const purchaseType = String(p.purchaseMode || p.purchaseType || '').toLowerCase() || 'cash';
+    const pick = (...vals) => vals.find((x) => x !== undefined && x !== null && x !== '');
+    const purchaseType = String(
+      pick(p.purchaseMode, p.purchaseType, values['Purchase Mode'], values.purchaseMode, values.purchaseType) || ''
+    ).toLowerCase() || 'cash';
     // Normalize address proof types
-    const apTypes = Array.isArray(p.addressProofTypes)
-      ? p.addressProofTypes
-      : String(p.addressProofTypes || '')
+    const apRaw = pick(p.addressProofTypes, values['Address Proof Types']);
+    const apTypes = Array.isArray(apRaw)
+      ? apRaw
+      : String(apRaw || '')
           .split(',')
           .map((s) => s.trim())
           .filter(Boolean);
@@ -53,22 +60,29 @@ export default function BookingInlineModal({ open, onClose, row, webhookUrl }) {
     payArr.forEach((pay, idx) => assignToPart(pay, idx));
 
     return {
-      customerName: p.customerName || p.name || '',
-      mobileNumber: String(p.mobileNumber || p.mobile || ''),
-      address: p.address || '',
-      branch: p.branch || '',
-      executive: p.executive || '',
-      company: v.company || '',
-      bikeModel: v.model || '',
-      variant: v.variant || '',
-      color: v.color || undefined,
-      chassisNo: v.chassisNo || (v.availability === 'allot' ? '__ALLOT__' : undefined),
-      rtoOffice: p.rtoOffice || 'KA',
+      customerName: pick(p.customerName, p.name, values['Customer Name'], values.Customer_Name) || '',
+      mobileNumber: String(pick(p.mobileNumber, p.mobile, values['Mobile Number'], values.Mobile, values.Phone) || ''),
+      address: pick(p.address, values['Address']) || '',
+      branch: pick(p.branch, values['Branch']) || '',
+      executive: pick(p.executive, values['Executive']) || '',
+      company: pick(v.company, p.company, values['Company']) || '',
+      bikeModel: pick(v.model, p.model, p.bikeModel, values['Model']) || '',
+      variant: pick(v.variant, p.variant, values['Variant']) || '',
+      color: pick(v.color, p.color, values['Color'], values['Colour']) || undefined,
+      chassisNo:
+        pick(v.chassisNo, p.chassisNo, values['Chassis Number'], values['Chassis No']) ||
+        (String(pick(v.availability, p.availability, values['Chassis Availability']) || '').toLowerCase() === 'allot'
+          ? '__ALLOT__'
+          : undefined),
+      rtoOffice: pick(p.rtoOffice, values['RTO Office']) || 'KA',
       purchaseType,
-      financier: purchaseType === 'loan' ? (p.financier || undefined) : undefined,
-      nohpFinancier: purchaseType === 'nohp' ? (p.financier || p.nohpFinancier || undefined) : undefined,
-      disbursementAmount: (purchaseType === 'loan' || purchaseType === 'nohp') ? (toNumber(p.disbursementAmount) || undefined) : undefined,
-      addressProofMode: p.addressProofMode || p.addressProof || 'aadhaar',
+      financier: purchaseType === 'loan' ? (pick(p.financier, values['Financier']) || undefined) : undefined,
+      nohpFinancier: purchaseType === 'nohp' ? (pick(p.financier, p.nohpFinancier, values['Financier']) || undefined) : undefined,
+      disbursementAmount:
+        (purchaseType === 'loan' || purchaseType === 'nohp')
+          ? (toNumber(pick(p.disbursementAmount, values['Disbursement Amount'])) || undefined)
+          : undefined,
+      addressProofMode: pick(p.addressProofMode, p.addressProof, values['Address Proof Mode']) || 'aadhaar',
       addressProofTypes: apTypes,
       // Split payments (prefill booking payments in form)
       bookingAmount1Cash: split[0].cash || undefined,
@@ -81,9 +95,10 @@ export default function BookingInlineModal({ open, onClose, row, webhookUrl }) {
       bookingAmount3Online: split[2].online || undefined,
       paymentReference3: split[2].ref || undefined,
       // Legacy totals for completeness (not directly shown; computed in form too)
-      bookingAmount: toNumber(p.bookingAmount ?? undefined) || undefined,
+      bookingAmount: toNumber(pick(p.bookingAmount, values['Booking Amount']) ?? undefined) || undefined,
       downPayment: toNumber((p.dp && p.dp.downPayment) ?? p.downPayment),
       extraFittingAmount: toNumber((p.dp && p.dp.extraFittingAmount) ?? p.extraFittingAmount),
+      discountAmount: toNumber((p.dp && p.dp.discountAmount) ?? p.discountAmount ?? p.discount),
       affidavitCharges: toNumber((p.dp && p.dp.affidavitCharges) ?? p.affidavitCharges),
     };
   };
@@ -98,8 +113,8 @@ export default function BookingInlineModal({ open, onClose, row, webhookUrl }) {
         if (webhookUrl && row.bookingId) {
           const resp = await saveBookingViaWebhook({ webhookUrl, method: 'GET', payload: { action: 'search', mode: 'booking', query: row.bookingId } });
           const j = resp?.data || resp;
-          const p = Array.isArray(j?.rows) && j.rows.length ? j.rows[0]?.payload : null;
-          if (active) setInitialValues(p ? normalizeFromPayload(p) : normalizeFromPayload({
+          const source = Array.isArray(j?.rows) && j.rows.length ? j.rows[0] : null;
+          if (active) setInitialValues(source ? normalizeFromPayload(source) : normalizeFromPayload({
             customerName: row.name,
             mobileNumber: row.mobile,
             branch: row.branch,

@@ -9,6 +9,11 @@ import BookingPrintQuickModal from './BookingPrintQuickModal';
 import { saveFollowUpBookingPrefill } from '../utils/followUpPrefill';
 import PostServiceSheet from "./PostServiceSheet";
 import { handleSmartPrint } from "../utils/printUtils";
+import { getOwnerConfig, resolveUnifiedGasUrl } from '../utils/ownerConfig';
+
+const DEFAULT_QUOT_URL = "https://script.google.com/macros/s/AKfycbwd-hKTwEfAretqEn7c_jIqNgheFgDaSVjCO3wHHQxgXQbbd8grLr8tUaRyLoAJWe4O/exec?module=quotation";
+const DEFAULT_BOOKING_URL = "https://script.google.com/macros/s/AKfycbwd-hKTwEfAretqEn7c_jIqNgheFgDaSVjCO3wHHQxgXQbbd8grLr8tUaRyLoAJWe4O/exec?module=booking";
+const DEFAULT_JOBCARD_URL = "https://script.google.com/macros/s/AKfycbwctVnLeUPs5PqC2v02h4b21ws4-uOaFt85yVIuUOMnaD5Yv7yp0dxb4z3jO47hVT7n/exec?module=jobcard";
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -98,15 +103,15 @@ const pillBtn = {
 const softCard = {
   borderRadius: 18,
   border: '1px solid #eef2f7',
-  boxShadow: '0 10px 34px rgba(15, 23, 42, 0.08)',
-  background: 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,255,255,0.92))',
+  boxShadow: '0 16px 38px rgba(15, 23, 42, 0.12)',
+  background: 'linear-gradient(135deg, rgba(255,255,255,0.99), rgba(247,250,255,0.94))',
 };
 
 const softPanel = {
   borderRadius: 16,
   border: '1px solid #eef2f7',
-  background: 'rgba(255,255,255,0.9)',
-  boxShadow: '0 10px 26px rgba(15, 23, 42, 0.06)',
+  background: 'rgba(255,255,255,0.96)',
+  boxShadow: '0 14px 32px rgba(15, 23, 42, 0.08)',
 };
 
 const kpiCard = {
@@ -117,7 +122,7 @@ const kpiCard = {
 };
 
 const kpiNum = { fontSize: 22, fontWeight: 800, lineHeight: 1 };
-const kpiLabel = { fontSize: 11, color: '#64748b', marginTop: 6 };
+const kpiLabel = { fontSize: 11, color: '#64748b', marginTop: 6, fontWeight: 600 };
 const rupeeFormatter =
   typeof Intl !== 'undefined'
     ? new Intl.NumberFormat('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
@@ -130,23 +135,23 @@ const formatCurrency = (value) => {
   return `${num < 0 ? '-' : ''}₹${formatted}`;
 };
 
-const QUOT_RATE_LOW = 9;
-const QUOT_RATE_HIGH = 11;
+const QUOT_DEFAULT_FLAT_RATE = 11;
 const QUOT_PROCESSING_FEE = 8000;
+const ownerCfgForQuotation = getOwnerConfig() || {};
+const QUOT_FLAT_RATE = (() => {
+  const v = Number(ownerCfgForQuotation?.flatInterestRate);
+  return Number.isFinite(v) && v >= 0 ? v : QUOT_DEFAULT_FLAT_RATE;
+})();
+const QUOT_EFFECTIVE_PROCESSING_FEE = (() => {
+  const v = Number(ownerCfgForQuotation?.processingFee);
+  return Number.isFinite(v) && v >= 0 ? v : QUOT_PROCESSING_FEE;
+})();
 
-const rateForQuotation = (price, dp) => {
-  const p = Number(price || 0);
-  const d = Number(dp || 0);
-  const dpPct = p > 0 ? d / p : 0;
-  return dpPct >= 0.3 ? QUOT_RATE_LOW : QUOT_RATE_HIGH;
-};
-
-const monthlyForQuotation = (price, dp, months) => {
-  const principalBase = Math.max(Number(price || 0) - Number(dp || 0), 0);
-  const principal = principalBase + QUOT_PROCESSING_FEE;
+const monthlyForQuotation = (price, _dp, months) => {
+  const principalBase = Math.max(Number(price || 0), 0);
+  const principal = principalBase + QUOT_EFFECTIVE_PROCESSING_FEE;
   const years = months / 12;
-  const rate = rateForQuotation(price, dp);
-  const totalInterest = principal * (rate / 100) * years;
+  const totalInterest = principal * (QUOT_FLAT_RATE / 100) * years;
   const total = principal + totalInterest;
   return months > 0 ? total / months : 0;
 };
@@ -160,39 +165,86 @@ const buildEmiText = (price, dp, emiSet) => {
   return parts.length ? `EMI(${emiSet || "12"}): ${parts.join(" | ")}` : "";
 };
 
-const buildQuotationOfferingsText = (row) => {
-  if (!row) return "";
-  const remarks = String(row.remarks || "").trim();
+const isFinanceMode = (mode) => {
+  const normalized = String(mode || "").trim().toLowerCase();
+  return ["loan", "nohp", "hp", "finance"].includes(normalized);
+};
+
+const uniqueNonEmpty = (list = []) =>
+  Array.from(
+    new Set(
+      (Array.isArray(list) ? list : [])
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+    )
+  );
+
+const buildQuotationOfferingDetails = (row) => {
+  if (!row) return { remarks: "", vehicles: [] };
   const p = row.payload || {};
   const fv = p.formValues || {};
-  const extra = Array.isArray(p.extraVehicles) ? p.extraVehicles : [];
-  const offerings = [];
-  const addVehicleOffer = (label, priceRaw, dpRaw, emiSetRaw) => {
+  const globalFittings = uniqueNonEmpty(p.fittings);
+  const remarks = String(row.remarks || fv.remarks || p.remarks || "").trim();
+  const vehicles = [];
+  const financeMode = isFinanceMode(row.mode || p.mode || p.purchaseMode || p.paymentType);
+
+  const addVehicle = ({
+    label,
+    company,
+    model,
+    variant,
+    priceRaw,
+    dpRaw,
+    emiSetRaw,
+    fittingsRaw,
+  }) => {
+    const cleanCompany = String(company || "").trim();
+    const cleanModel = String(model || "").trim();
+    const cleanVariant = String(variant || "").trim();
     const price = Number(priceRaw || 0);
     const dp = Number(dpRaw || 0);
-    if (!(price || dp)) return;
-    const parts = [];
-    if (price) parts.push(`Price ${formatCurrency(price)}`);
-    if (dp) parts.push(`DP ${formatCurrency(dp)}`);
-    const emiText = buildEmiText(price, dp, emiSetRaw || p.emiSet || "12");
-    if (emiText) parts.push(emiText);
-    offerings.push(`${label}: ${parts.join(" | ")}`);
+    const fittings = uniqueNonEmpty(fittingsRaw || globalFittings);
+    const title = [cleanCompany, cleanModel, cleanVariant].filter(Boolean).join(" ");
+    const hasMeta = Boolean(title || fittings.length || price || dp);
+    if (!hasMeta) return;
+
+    vehicles.push({
+      label,
+      title: title || "Vehicle details not available",
+      fittings,
+      priceText: price ? formatCurrency(price) : "—",
+      dpText: dp ? formatCurrency(dp) : "—",
+      emiText: price ? buildEmiText(price, dp, emiSetRaw || p.emiSet || "12") : "",
+      financeMode,
+    });
   };
-  addVehicleOffer(
-    "V1",
-    fv.onRoadPrice ?? p.onRoadPrice,
-    fv.downPayment ?? p.downPayment,
-    p.emiSet
-  );
-  extra.forEach((ev, idx) => {
-    addVehicleOffer(
-      `V${idx + 2}`,
-      ev.onRoadPrice,
-      ev.downPayment,
-      ev.emiSet || p.emiSet
-    );
+
+  addVehicle({
+    label: "Vehicle 1",
+    company: fv.company ?? p.company,
+    model: fv.bikeModel ?? fv.model ?? p.model ?? row.model,
+    variant: fv.variant ?? p.variant ?? row.variant,
+    priceRaw: fv.onRoadPrice ?? p.onRoadPrice ?? row.price,
+    dpRaw: fv.downPayment ?? p.downPayment,
+    emiSetRaw: p.emiSet,
+    fittingsRaw: p.fittings,
   });
-  return [remarks, ...offerings].filter(Boolean).join(" • ");
+
+  const extra = Array.isArray(p.extraVehicles) ? p.extraVehicles : [];
+  extra.forEach((ev, idx) => {
+    addVehicle({
+      label: `Vehicle ${idx + 2}`,
+      company: ev.company,
+      model: ev.model,
+      variant: ev.variant,
+      priceRaw: ev.onRoadPrice,
+      dpRaw: ev.downPayment,
+      emiSetRaw: ev.emiSet || p.emiSet,
+      fittingsRaw: ev.fittings,
+    });
+  });
+
+  return { remarks, vehicles };
 };
 
 /**
@@ -201,7 +253,7 @@ const buildQuotationOfferingsText = (row) => {
  * - mode: 'quotation' | 'jobcard' (default: 'quotation')
  * - webhookUrl: GAS URL for the selected mode
  */
-export default function FollowUps({ mode = 'quotation', webhookUrl, onClose }) {
+export default function FollowUps({ mode = 'quotation', webhookUrl: webhookUrlProp, onClose }) {
   const navigate = useNavigate();
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
@@ -238,6 +290,20 @@ export default function FollowUps({ mode = 'quotation', webhookUrl, onClose }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [preparingBooking, setPreparingBooking] = useState(false);
+
+  const { modeKey, isBooking, isJobcard, isQuotation } = React.useMemo(() => {
+    const key = String(mode || '').toLowerCase();
+    const isBooking = key === 'booking';
+    const isJobcard = key === 'jobcard';
+    return { modeKey: key, isBooking, isJobcard, isQuotation: !isBooking && !isJobcard };
+  }, [mode]);
+
+  const webhookUrl = webhookUrlProp
+    || (isBooking
+      ? resolveUnifiedGasUrl('booking', import.meta.env.VITE_BOOKING_GAS_URL || DEFAULT_BOOKING_URL)
+      : isJobcard
+      ? resolveUnifiedGasUrl('jobcard', import.meta.env.VITE_JOBCARD_GAS_URL || DEFAULT_JOBCARD_URL)
+      : resolveUnifiedGasUrl('quotation', import.meta.env.VITE_QUOTATION_GAS_URL || DEFAULT_QUOT_URL));
 
   const normalizedUserRole = String(userRole || '').toLowerCase();
   const isPrivilegedUser = ['owner','admin'].includes(normalizedUserRole);
@@ -299,11 +365,6 @@ export default function FollowUps({ mode = 'quotation', webhookUrl, onClose }) {
       setMe({ name, branch: uniq[0] || primaryBranch || '' });
     })();
   }, []);
-
-  const modeKey = String(mode || '').toLowerCase();
-  const isJobcard = modeKey === 'jobcard';
-  const isBooking = modeKey === 'booking';
-  const isQuotation = !isJobcard && !isBooking;
   const getRowEffectiveStatus = (row) => {
     if (isBooking) {
       const balanceStatus = getRowBalanceStatus(row);
@@ -1312,7 +1373,7 @@ const extractRawPayloadObject = (...sources) => {
                   return String(s || 'pending').toLowerCase();
                 })(),
           price: Number((fv.onRoadPrice ?? p.onRoadPrice ?? fv.price ?? p.price) || 0),
-          brand: (p.brand || '').toUpperCase() || 'SHANTHA',
+          brand: (p.brand || '').toUpperCase() || 'MOTERA',
           remarks: fv.remarks || p.remarks || values.Remarks || values.remarks || '',
           jcNo: fv.jcNo || p.jcNo || values['JC No'] || values['JC No.'] || values['Job Card No'] || serial || '-',
           regNo: fv.regNo || values['Vehicle No'] || values['Vehicle_No'] || '',
@@ -1453,23 +1514,24 @@ const extractRawPayloadObject = (...sources) => {
   };
 
   const fmt = (d) => (d && d.isValid && d.isValid()) ? d.format('DD-MM-YYYY HH:mm') : '—';
-  const stackStyle = { display: 'flex', flexDirection: 'column', gap: 2, lineHeight: 1.2 };
+  const stackStyle = { display: 'flex', flexDirection: 'column', gap: 4, lineHeight: 1.25 };
   const lineStyle = { whiteSpace: isMobile ? 'normal' : 'nowrap', overflow: 'hidden', textOverflow: isMobile ? 'clip' : 'ellipsis' };
-  const smallLineStyle = { ...lineStyle, fontSize: isMobile ? 11 : 10 };
-  const tinyLineStyle = { ...lineStyle, fontSize: isMobile ? 10 : 9 };
+  const smallLineStyle = { ...lineStyle, fontSize: isMobile ? 12 : 12 };
   const twoLineClamp = {
     display: '-webkit-box',
     WebkitBoxOrient: 'vertical',
     WebkitLineClamp: isMobile ? 4 : 3,
     overflow: 'hidden',
     whiteSpace: 'normal',
-    fontSize: isMobile ? 9 : 8,
-    lineHeight: 1,
+    fontSize: isMobile ? 12 : 11,
+    lineHeight: 1.35,
   };
   const offeringClamp = {
     ...twoLineClamp,
-    WebkitLineClamp: isMobile ? 3 : 4,
-    fontSize: isMobile ? 8 : 7,
+    WebkitLineClamp: 2,
+    fontSize: isMobile ? 11 : 10.5,
+    fontWeight: 600,
+    color: '#1f2937',
   };
 
   const filteredRows = React.useMemo(() => {
@@ -1538,11 +1600,11 @@ const extractRawPayloadObject = (...sources) => {
   }, [filteredRows.length, page, pageSize]);
 
   const controlWidth = isMobile ? '100%' : undefined;
-  const kpiPad = isMobile ? 10 : 12;
-  const kpiMin = isMobile ? 110 : 120;
-  const kpiWideMin = isMobile ? 160 : 180;
+  const kpiPad = isMobile ? 10 : 14;
+  const kpiMin = isMobile ? 110 : 132;
+  const kpiWideMin = isMobile ? 160 : 210;
   const kpiNumStyle = isMobile ? { ...kpiNum, fontSize: 18 } : kpiNum;
-  const kpiLabelStyle = isMobile ? { ...kpiLabel, fontSize: 10 } : kpiLabel;
+  const kpiLabelStyle = isMobile ? { ...kpiLabel, fontSize: 10 } : { ...kpiLabel, fontSize: 11 };
 
   const openPostService = (row) => {
     const mobile = String(row?.mobile || '').replace(/\D/g, '').slice(-10);
@@ -1696,12 +1758,34 @@ const extractRawPayloadObject = (...sources) => {
     }
   };
 
-  const statusTagStyle = { fontSize: isMobile ? 9 : 10, lineHeight: '1.1', marginRight: 0 };
+  const statusTagStyle = {
+    fontSize: isMobile ? 10 : 11,
+    lineHeight: '1.2',
+    marginRight: 0,
+    fontWeight: 700,
+    borderRadius: 8,
+    width: '100%',
+    textAlign: 'left',
+    paddingInline: 6,
+    paddingBlock: 1,
+  };
   const actionBtnStyle = { height: isMobile ? 22 : 26, padding: isMobile ? '0 8px' : '0 10px', borderRadius: 999, fontSize: isMobile ? 11 : 12, fontWeight: 700 };
   const actionBtnSecondaryStyle = { height: isMobile ? 22 : 26, padding: isMobile ? '0 8px' : '0 10px', borderRadius: 999, fontSize: isMobile ? 11 : 12 };
-  const quotationActionBtnStyle = { height: isMobile ? 20 : 22, padding: isMobile ? '0 6px' : '0 8px', borderRadius: 999, fontSize: isMobile ? 10 : 11, fontWeight: 600 };
-  const quotationActionBtnSecondaryStyle = { height: isMobile ? 20 : 22, padding: isMobile ? '0 6px' : '0 8px', borderRadius: 999, fontSize: isMobile ? 10 : 11 };
+  const quotationActionBtnStyle = { height: isMobile ? 28 : 30, padding: isMobile ? '0 10px' : '0 12px', borderRadius: 999, fontSize: isMobile ? 12 : 13, fontWeight: 700 };
+  const quotationActionBtnSecondaryStyle = { height: isMobile ? 28 : 30, padding: isMobile ? '0 10px' : '0 12px', borderRadius: 999, fontSize: isMobile ? 12 : 13, fontWeight: 600 };
   const iconBtnStyle = { height: isMobile ? 20 : 18, padding: '0 6px', fontSize: isMobile ? 11 : 10 };
+  const quotationCallBtnStyle = { ...quotationActionBtnSecondaryStyle, color: '#1f2937', background: '#fff', border: '1px solid #d1d5db' };
+  const jobcardCallBtnStyle = { ...actionBtnSecondaryStyle, color: '#1f2937', background: '#fff', border: '1px solid #d1d5db' };
+
+  const openCallDialer = (mobile) => {
+    const digits = String(mobile || '').replace(/\D/g, '');
+    const local = digits.length >= 10 ? digits.slice(-10) : '';
+    if (!local) {
+      message.warning('Valid mobile number not available for this customer.');
+      return;
+    }
+    window.location.href = `tel:${local}`;
+  };
 
   const renderJobcardStatusActions = (r) => {
     const status = String(r.status || '').toLowerCase();
@@ -1716,30 +1800,42 @@ const extractRawPayloadObject = (...sources) => {
             {STATUS_LABEL[r.status] || r.status}
           </Tag>
         </Tooltip>
-        {isPending ? (
-          <Button
-            size="small"
-            type="primary"
-            icon={<PhoneOutlined />}
-            style={actionBtnStyle}
-            onClick={() => openPostService(r)}
-          >
-            Post Service
-          </Button>
-        ) : isCompleted ? (
-          <Button
-            size="small"
-            type="default"
-            icon={<FileTextOutlined />}
-            loading={isInvoiceLoading}
-            style={actionBtnSecondaryStyle}
-            onClick={() => handleServiceInvoice(r)}
-          >
-            Service Invoice
-          </Button>
-        ) : (
-          <span style={{ fontSize: 10, color: '#999' }}>—</span>
-        )}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Tooltip title="Call customer">
+            <Button
+              size="small"
+              icon={<PhoneOutlined />}
+              style={jobcardCallBtnStyle}
+              aria-label={`Call ${r.mobile || 'customer'}`}
+              onClick={() => openCallDialer(r.mobile)}
+            >
+              Call
+            </Button>
+          </Tooltip>
+          {isPending ? (
+            <Button
+              size="small"
+              type="primary"
+              style={actionBtnStyle}
+              onClick={() => openPostService(r)}
+            >
+              Post Service
+            </Button>
+          ) : isCompleted ? (
+            <Button
+              size="small"
+              type="default"
+              icon={<FileTextOutlined />}
+              loading={isInvoiceLoading}
+              style={actionBtnSecondaryStyle}
+              onClick={() => handleServiceInvoice(r)}
+            >
+              Service Invoice
+            </Button>
+          ) : (
+            <span style={{ fontSize: 10, color: '#999' }}>—</span>
+          )}
+        </div>
       </div>
     );
   };
@@ -1751,18 +1847,31 @@ const extractRawPayloadObject = (...sources) => {
           {STATUS_LABEL[r.status] || r.status}
         </Tag>
       </Tooltip>
-      <div style={{ display: 'flex', gap: 4 }}>
-        <Tooltip title="Mark done/booked with reason">
-          <Button
-            size="small"
-            type="primary"
-            icon={<CheckCircleOutlined />}
-            style={quotationActionBtnStyle}
-            onClick={() => setClosing({ open: true, serial: r.serialNo, status: 'converted', reason: '', notes: '' })}
-          >
-            Done
-          </Button>
-        </Tooltip>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Tooltip title="Call customer">
+            <Button
+              size="small"
+              icon={<PhoneOutlined />}
+              style={quotationCallBtnStyle}
+              aria-label={`Call ${r.mobile || 'customer'}`}
+              onClick={() => openCallDialer(r.mobile)}
+            >
+              Call
+            </Button>
+          </Tooltip>
+          <Tooltip title="Mark done/booked with reason">
+            <Button
+              size="small"
+              type="primary"
+              icon={<CheckCircleOutlined />}
+              style={quotationActionBtnStyle}
+              onClick={() => setClosing({ open: true, serial: r.serialNo, status: 'converted', reason: '', notes: '' })}
+            >
+              Done
+            </Button>
+          </Tooltip>
+        </div>
         <Button
           size="small"
           style={quotationActionBtnSecondaryStyle}
@@ -1895,24 +2004,60 @@ const extractRawPayloadObject = (...sources) => {
     { title: 'Status + File', key: 'statusFile', width: 170, render: (_, r) => renderBookingStatusFile(r) },
     { title: 'Balance', key: 'balance', width: 140, render: (_, r) => renderBookingBalance(r) },
   ] : [
-    { title: 'Date / Branch', key: 'dateBranch', width: 100, render: (_, r) => (
+    { title: 'Date / Branch', key: 'dateBranch', width: 145, render: (_, r) => (
       <div style={stackStyle}>
-        <div style={tinyLineStyle}>{fmt(r.dateAt)}</div>
-        <div style={tinyLineStyle}>{r.branch || '—'}</div>
+        <div style={{ ...smallLineStyle, fontWeight: 700 }}>{fmt(r.dateAt)}</div>
+        <div style={{ ...smallLineStyle, color: '#475569' }}>{r.branch || '—'}</div>
       </div>
     ) },
-    { title: 'Customer / Mobile', key: 'customerMobile', width: 120, render: (_, r) => (
+    { title: 'Customer / Mobile', key: 'customerMobile', width: 165, render: (_, r) => (
       <div style={stackStyle}>
-        <div style={tinyLineStyle}>{r.name || '—'}</div>
-        <div style={tinyLineStyle}>{r.mobile || '—'}</div>
+         <div style={{ ...smallLineStyle, fontWeight: 700 }}>{r.name || '—'}</div>
+        <div style={{ ...smallLineStyle, color: '#334155' }}>{r.mobile || '—'}</div>
       </div>
     ) },
-    { title: 'Offerings', key: 'remarks', width: 400, render: (_, r) => {
-      const offeringText = buildQuotationOfferingsText(r);
+    { title: 'Offerings', key: 'remarks', width: 265, render: (_, r) => {
+      const details = buildQuotationOfferingDetails(r);
+      const count = details.vehicles.length;
+      
+      const popoverContent = (
+        <div className="fu-offering-pop">
+          <div className="fu-offering-head">
+            <span>{count ? `${count} Vehicle Offer${count > 1 ? 's' : ''}` : 'Offer Details'}</span>
+          </div>
+          
+          {details.vehicles.length ? details.vehicles.map((v) => (
+            <div key={v.label} className="fu-offering-vehicle">
+              <div className="fu-offering-vehicle-title">{v.label}</div>
+              <div className="fu-offering-vehicle-model">{v.title}</div>
+              <div className="fu-offering-metrics">
+                <span><b>Price</b>: {v.priceText}</span>
+                {v.financeMode ? <span><b>DP</b>: {v.dpText}</span> : null}
+              </div>
+              {v.financeMode && v.emiText ? <div className="fu-offering-emi">{v.emiText}</div> : null}
+              {v.fittings.length ? (
+                <div className="fu-offering-fit">
+                  <b>Fittings</b>: {v.fittings.join(', ')}
+                </div>
+              ) : null}
+            </div>
+          )) : (
+            <div className="fu-offering-empty">No vehicle-wise offer added.</div>
+          )}
+        </div>
+      );
       return (
-        <Tooltip title={offeringText || undefined}>
-          <div style={offeringClamp}>{offeringText || ''}</div>
-        </Tooltip>
+          <Popover content={popoverContent} trigger={['hover', 'click']} placement="topLeft" overlayClassName="fu-offering-popover">
+          <div className="fu-offering-list">
+            {count ? details.vehicles.map((v) => (
+              <div key={v.label} className="fu-offering-list-item">
+                <span className="fu-offering-list-label">{v.label}:</span> {v.title}
+              </div>
+            )) : (
+              <div style={offeringClamp}>No offering details</div>
+            )}
+          </div>
+        </Popover>
       );
     } },
     { title: 'Status + Actions', key: 'statusActions', width: 140, render: (_, r) => renderQuotationStatusActions(r) },
@@ -1970,16 +2115,55 @@ const extractRawPayloadObject = (...sources) => {
     { title: 'Details', key: 'details', render: (_, r) => {
       const dateBranch = [fmt(r.dateAt), r.branch || '—'].filter(Boolean).join(' | ');
       const custMobile = [r.name || '—', r.mobile || '—'].filter(Boolean).join(' | ');
-      const remarks = buildQuotationOfferingsText(r);
+      const details = buildQuotationOfferingDetails(r);
+      const count = details.vehicles.length;
       const notes = String(r.followUpNotes || '').trim();
+      const popoverContent = (
+        <div className="fu-offering-pop">
+          <div className="fu-offering-head">
+            <span>{count ? `${count} Vehicle Offer${count > 1 ? 's' : ''}` : 'Offer Details'}</span>
+          </div>
+          {details.vehicles.length ? details.vehicles.map((v) => (
+            <div key={v.label} className="fu-offering-vehicle">
+              <div className="fu-offering-vehicle-title">{v.label}</div>
+              <div className="fu-offering-vehicle-model">{v.title}</div>
+              <div className="fu-offering-metrics">
+                <span><b>Price</b>: {v.priceText}</span>
+                {v.financeMode ? <span><b>DP</b>: {v.dpText}</span> : null}
+              </div>
+              {v.financeMode && v.emiText ? <div className="fu-offering-emi">{v.emiText}</div> : null}
+              {v.fittings.length ? (
+                <div className="fu-offering-fit">
+                  <b>Fittings</b>: {v.fittings.join(', ')}
+                </div>
+              ) : null}
+            </div>
+          )) : (
+            <div className="fu-offering-empty">No vehicle-wise offer added.</div>
+          )}
+        </div>
+      );
       return (
         <div style={stackStyle}>
           <div style={lineStyle}>{dateBranch || '—'}</div>
           <div style={smallLineStyle}>{custMobile || '—'}</div>
-          {remarks ? (
-            <div style={offeringClamp}><span style={{ color: '#64748b' }}>Offer: </span>{remarks}</div>
+          {count ? (
+            <Popover
+              content={popoverContent}
+              trigger={['click']}
+              placement="topLeft"
+              overlayClassName="fu-offering-popover"
+            >
+              <div className="fu-offering-list">
+                {details.vehicles.map((v) => (
+                  <div key={v.label} className="fu-offering-list-item">
+                    <span className="fu-offering-list-label">{v.label}:</span> {v.title}
+                  </div>
+                ))}
+              </div>
+            </Popover>
           ) : (
-            <div style={offeringClamp}></div>
+            <div style={offeringClamp}>No offering details</div>
           )}
           {notes ? (
             <div style={twoLineClamp}><span style={{ color: '#64748b' }}>Notes: </span>{notes}</div>
@@ -2008,6 +2192,9 @@ const extractRawPayloadObject = (...sources) => {
             padding: 14px;
           }
           .row-pending td { background: rgba(250, 140, 22, 0.09) !important; }
+          .compact-table .ant-table-tbody > tr:nth-child(even) > td {
+            background: rgba(15, 23, 42, 0.015);
+          }
           .compact-table { border-radius: 16px; overflow: hidden; }
           .compact-table .ant-table { border-radius: 16px; }
           .compact-table .ant-table-thead > tr > th {
@@ -2019,6 +2206,15 @@ const extractRawPayloadObject = (...sources) => {
             font-weight: 700;
             color: #0f172a;
             border-bottom: 1px solid #eef2f7;
+            font-size: 13px;
+            padding-top: 10px !important;
+            padding-bottom: 10px !important;
+          }
+          .compact-table .ant-table-tbody > tr > td {
+            padding-top: 9px !important;
+            padding-bottom: 9px !important;
+            vertical-align: top;
+            border-bottom: 1px solid #f1f5f9;
           }
           .compact-table .ant-table-tbody > tr:hover > td {
             background: rgba(99, 102, 241, 0.06) !important;
@@ -2032,6 +2228,10 @@ const extractRawPayloadObject = (...sources) => {
           .fu-pill-input .ant-input-affix-wrapper {
             border-radius: 999px !important;
             box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
+            min-height: 36px;
+          }
+          .fu-pill-input .ant-input {
+            font-size: 13px;
           }
           .fu-seg .ant-segmented {
             border-radius: 999px;
@@ -2042,6 +2242,88 @@ const extractRawPayloadObject = (...sources) => {
           .fu-seg .ant-segmented-item {
             border-radius: 999px !important;
             font-weight: 600;
+          }
+            .fu-offering-popover .ant-popover-inner {
+            border-radius: 14px;
+            border: 1px solid #dbeafe;
+            box-shadow: 0 18px 40px rgba(15, 23, 42, 0.2);
+            padding: 10px;
+            min-width: 360px;
+            max-width: 520px;
+            background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+          }
+          .fu-offering-pop { display: flex; flex-direction: column; gap: 8px; }
+          .fu-offering-head {
+            font-size: 13px;
+            font-weight: 800;
+            color: #1d4ed8;
+            letter-spacing: 0.2px;
+          }
+          .fu-offering-remarks {
+            border-left: 3px solid #93c5fd;
+            padding-left: 8px;
+            color: #0f172a;
+            font-size: 12px;
+            line-height: 1.35;
+          }
+          .fu-offering-vehicle {
+            border: 1px solid #dbeafe;
+            border-radius: 10px;
+            padding: 8px;
+            background: #f8fbff;
+          }
+          .fu-offering-vehicle-title {
+            font-size: 11px;
+            font-weight: 800;
+            color: #1e3a8a;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+          }
+          .fu-offering-vehicle-model {
+            font-size: 12px;
+            font-weight: 700;
+            color: #111827;
+            margin-bottom: 4px;
+          }
+          .fu-offering-metrics {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            font-size: 12px;
+            color: #1f2937;
+          }
+          .fu-offering-emi {
+            margin-top: 4px;
+            font-size: 11px;
+            color: #334155;
+            line-height: 1.3;
+          }
+          .fu-offering-fit {
+            margin-top: 4px;
+            font-size: 11px;
+            color: #334155;
+            line-height: 1.3;
+          }
+          .fu-offering-empty {
+            font-size: 12px;
+            color: #64748b;
+          }
+          @media (max-width: 640px) {
+            .fu-bg {
+              border-radius: 12px;
+              padding: 10px;
+            }
+            .compact-table .ant-table-thead > tr > th {
+              font-size: 12px;
+            }
+            .compact-table .ant-table-tbody > tr > td {
+              padding-top: 8px !important;
+              padding-bottom: 8px !important;
+            }
+            .fu-offering-popover .ant-popover-inner {
+              min-width: 280px;
+              max-width: calc(100vw - 24px);
+            }
           }
         `}</style>
         <Card style={softCard} bodyStyle={{ padding: isMobile ? 12 : 16 }}>

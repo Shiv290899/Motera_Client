@@ -1,6 +1,7 @@
 // components/BookingPrintSheet.jsx
 import React, { forwardRef } from "react";
 import { fmtDate, inr } from "../utils/printUtils";
+import { getOwnerOrgName, getOwnerOrgAddress, getOwnerLogoUrl } from "../utils/ownerConfig";
 
 /**
  * Printable A4 booking slip for vehicle bookings.
@@ -14,11 +15,10 @@ import { fmtDate, inr } from "../utils/printUtils";
  * breakdown (cash/online with ref). One-page A4. Labels with inline values.
  */
 const BookingPrintSheet = forwardRef(function BookingPrintSheet({ active = true, vals = {} }, ref) {
-  // Normalize brand by branch (Byadarahalli => NH Motors)
-  const branchRaw = String(vals?.branch || "").trim();
-  const branch = branchRaw;
-  const branchKey = branchRaw.toLowerCase();
-  const isNH = branchKey === "byadarahalli";
+  const isNH = false;
+  const orgName = getOwnerOrgName() || "Motera";
+  const orgAddress = getOwnerOrgAddress();
+  const logoUrl = getOwnerLogoUrl() || "";
 
   // Customer
   const custName =
@@ -215,33 +215,18 @@ img { max-width: 100%; height: auto; background: transparent; }
         <div className="wrap">
           <div className="box">
             <div className="hdr">
-              <img
-                src={isNH ? "/honda-logo.png" : "/shantha-logoprint.jpg"}
-                alt={isNH ? "NH Motors" : "Shantha Motors"}
-                style={{ width: "100%", maxHeight: 92 }}
-              />
+              {logoUrl ? (
+                <img
+                  src={logoUrl}
+                  alt={orgName}
+                  style={{ width: "100%", maxHeight: 92 }}
+                />
+              ) : null}
               <div className="shop">
-                {isNH ? (
-                  <>
-                    <div className="en">NH MOTORS | ಎನ್ ಎಚ್ ಮೋಟರ್ಸ್</div>
-                    <div className="sub" style={{ marginTop: 4 }}>
-                      Site No. 116/1, Bydarahalli, Magadi Main Road, Opp.<br />
-                      HP Petrol Bunk, Bangalore - 560091
-                    </div>
-                    <div className="sub">Mob: 9731366921 / 8073283502 / 9741609799</div>
-                  </>
-                ) : (
-                  <>
-                    <div className="en">SHANTHA MOTORS | ಶಾಂತ ಮೋಟರ್ಸ್</div>
-                    <div className="sub">Multi Brand Two Wheeler Sales &amp; Service</div>
-                    <div className="sub">Mob No : 9731366921 / 8073283502</div>
-                    <div className="tiny">Kadabagere • Muddinapalya  • Andrahalli • Tavarekere • Hegganahalli • Channenahalli • Nelagadrahalli</div>
-                  </>
-                )}
+                <div className="en">{orgName}</div>
+                {orgAddress ? <div className="sub">{orgAddress}</div> : null}
               </div>
               <div>
-                <img src="/location-qr.png" alt="Location QR" style={{ width: "100%", maxHeight: 92 }} />
-                <div style={{ fontSize: 12.5, fontWeight: 600, marginTop: 4 }}>Scan for Location</div>
               </div>
             </div>
 
@@ -252,14 +237,6 @@ img { max-width: 100%; height: auto; background: transparent; }
               <div className="kv">
                 <div className="name"><span className="label">Date:</span></div>
                 <div className="val">{fmtDate(createdAt)}</div>
-              </div>
-              <div className="kv">
-                <div className="name"><span className="label">Branch:</span></div>
-                <div className="val">{branch || "-"}</div>
-              </div>
-              <div className="kv">
-                <div className="name"><span className="label">Executive:</span></div>
-                <div className="val">{executive}</div>
               </div>
             </div>
 
@@ -372,7 +349,7 @@ img { max-width: 100%; height: auto; background: transparent; }
             <div className="sign-row">
               <div className="sign tiny">Customer Signature</div>
               <div className="sign tiny">
-                {isNH ? "For NH Motors" : "For Shantha Motors"} — Authorised Signatory
+                For {orgName} — Authorised Signatory
               </div>
             </div>
           </div>

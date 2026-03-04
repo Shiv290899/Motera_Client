@@ -12,6 +12,7 @@ const EmiCalculator = lazy(() => import("./Components/EmiCalculator"));
 const Home = lazy(() => import("./Components/Home"));
 const Login = lazy(() => import("./Components/Login"));
 const Register = lazy(() => import("./Components/Register"));
+const OwnerProfile = lazy(() => import("./Components/OwnerProfile"));
 const Quotation = lazy(() => import("./Components/Quotation"));
 const JobCard = lazy(() => import("./Components/JobCard"));
 const Admin = lazy(() => import("./Components/Admin"));
@@ -39,6 +40,7 @@ function App() {
           <Route path="/login" element={<GuestRoute><Login /></GuestRoute>} />
           <Route path="/quotation" element={<ProtectedRoute><Quotation /></ProtectedRoute>} />
           <Route path="/register" element={<GuestRoute><Register /></GuestRoute>} />
+          <Route path="/profile" element={<ProtectedRoute><OwnerProfile /></ProtectedRoute>} />
           <Route path="/jobcard" element={<ProtectedRoute><JobCard /></ProtectedRoute>} />
           <Route path="/stock" element={<ProtectedRoute><StockUpdate /></ProtectedRoute>} />
 

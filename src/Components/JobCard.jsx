@@ -1,5 +1,5 @@
 // JobCard.jsx
-import React, { useEffect, useMemo, useState, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import {
   Alert,
   Card,
@@ -28,10 +28,11 @@ import { FaWhatsapp } from "react-icons/fa";
 import PreServiceSheet from "./PreServiceSheet";
 import PostServiceSheet from "./PostServiceSheet";
 import FetchJobcard from "./FetchJobcard";
-import { saveJobcardViaWebhook, reserveJobcardSerial } from "../apiCalls/forms";
+import { saveBookingViaWebhook, saveJobcardViaWebhook, reserveJobcardSerial } from "../apiCalls/forms";
 import { GetCurrentUser } from "../apiCalls/users";
 import { getBranch, listBranchesPublic } from "../apiCalls/branches";
 import { listUsersPublic } from "../apiCalls/adminUsers";
+import { getOwnerMechanics, getOwnerOrgName, getOwnerOrgNameRegional, resolveLocationQrImageUrl, resolveUnifiedGasUrl } from "../utils/ownerConfig";
 import { normalizeKey, uniqCaseInsensitive } from "../utils/caseInsensitive";
 
 const { Title, Text } = Typography;
@@ -44,58 +45,105 @@ const { Option } = Select;
 // Apps Script Web App URL (default set here; env can override)
 // Default Job Card GAS URL
 const DEFAULT_JOBCARD_GAS_URL =
-  "https://script.google.com/macros/s/AKfycbw7DzKCy3wZeeRBEM5XKIu6w0gt_2ouCaSkpaKv0UkjkQThCtVoRciOkkYT8sNViQuEaw/exec";
-const JOBCARD_GAS_URL = import.meta.env.VITE_JOBCARD_GAS_URL || DEFAULT_JOBCARD_GAS_URL;
+  "https://script.google.com/macros/s/AKfycbwd-hKTwEfAretqEn7c_jIqNgheFgDaSVjCO3wHHQxgXQbbd8grLr8tUaRyLoAJWe4O/exec?module=jobcard";
+const getJobcardGasUrl = () =>
+  resolveUnifiedGasUrl('jobcard', import.meta.env.VITE_JOBCARD_GAS_URL || DEFAULT_JOBCARD_GAS_URL);
 const JOBCARD_GAS_SECRET = import.meta.env.VITE_JOBCARD_GAS_SECRET || "";
+
+const DEFAULT_VEHICLE_CATALOG_GAS_URL =
+  "https://script.google.com/macros/s/AKfycbz_DoNoD0XTx3RNMOSZfypbMqWVN4yTy3ct96aE4LhJ9yb_YvKr0GRbO_GA3Fgkwptb/exec?module=vehiclecatalog";
+const getVehicleCatalogGasUrl = () =>
+  resolveUnifiedGasUrl(
+    "vehiclecatalog",
+    import.meta.env.VITE_VEHICLE_CATALOG_GAS_URL || DEFAULT_VEHICLE_CATALOG_GAS_URL
+  );
+
+const CATALOG_CSV_URL =
+  import.meta.env.VITE_VEHICLE_SHEET_CSV_URL ||
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vQYGuNPY_2ivfS7MTX4bWiu1DWdF2mrHSCnmTznZVEHxNmsrgcGWjVZN4UDUTOzQQdXTnbeM-ylCJbB/pub?gid=408799621&single=true&output=csv";
+
+const CATALOG_HEADERS = {
+  company: ["Company", "Company Name"],
+  model: ["Model", "Model Name"],
+  variant: ["Variant"],
+};
+
+const parseCsv = (text) => {
+  const rows = [];
+  let row = [], col = "", inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i], n = text[i + 1];
+    if (c === '"' && !inQuotes) { inQuotes = true; continue; }
+    if (c === '"' && inQuotes) {
+      if (n === '"') { col += '"'; i++; continue; }
+      inQuotes = false; continue;
+    }
+    if (c === "," && !inQuotes) { row.push(col); col = ""; continue; }
+    if ((c === "\n" || c === "\r") && !inQuotes) {
+      if (col !== "" || row.length) { row.push(col); rows.push(row); row = []; col = ""; }
+      if (c === "\r" && n === "\n") i++;
+      continue;
+    }
+    col += c;
+  }
+  if (col !== "" || row.length) { row.push(col); rows.push(row); }
+  return rows;
+};
+
+const fetchSheetRowsCSV = async (url) => {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error("Sheet fetch failed");
+  const csv = await res.text();
+  if (csv.trim().startsWith("<")) throw new Error("Expected CSV, got HTML");
+  const rows = parseCsv(csv);
+  if (!rows.length) return [];
+  const headers = rows[0].map((h) => (h || "").trim());
+  return rows.slice(1).map((r) => {
+    const obj = {};
+    headers.forEach((h, i) => (obj[h] = r[i] ?? ""));
+    return obj;
+  });
+};
+
+const pick = (row, keys) =>
+  String(keys.map((k) => row[k] ?? "").find((v) => v !== "") || "").trim();
+
+const normalizeCatalogRow = (row = {}) => ({
+  company: pick(row, CATALOG_HEADERS.company),
+  model: pick(row, CATALOG_HEADERS.model),
+  variant: pick(row, CATALOG_HEADERS.variant),
+});
 
 // Google Form constants removed — now using Apps Script webhook
 
-// Branches
-const BRANCHES = [
-  "Byadarahalli",
-  "Kadabagere",
-  "Muddinapalya",
-  "Andrahalli",
-  "Tavarekere",
-  "Hegganahalli",
-  "Channenahalli",
-  "Nelagadrahalli",
-];
-
-// Fallback list used for owner/admin executive dropdown when API not loaded
-const EXECUTIVES = [
-  { name: "Rukmini", phone: "9901678562" },
-  { name: "Meghana", phone: "9741609799" },
-  { name: "Shubha", phone: "8971585057" },
-  { name: "Rani", phone: "9108970455" },
-  { name: "Likhitha", phone: "9535190015" },
-  { name: "Vanitha", phone: "9380729861" },
-  { name: "Prakash", phone: "9740176476" },
-  { name: "Swathi", phone: "6363116317" },
-  { name: "Kumar", phone: "7975807667" },
-  { name: "Sujay", phone: "7022878048" },
-  { name: "Kavi", phone: "9108970455" },
-  { name: "Narasimha", phone: "9900887666" },
-  { name: "Kavya", phone: "8073165374" },
-];
-
 const SERVICE_TYPES = ["Free", "Paid", "Minor", "Accidental"]; // checkbox UI (single-select enforced)
 const VEHICLE_TYPES = ["Motorcycle", "Scooter"]; // tabs
-const MECHANIC = ["SONU", "KARTHIK", "MANMOHAN", "MANSUR", "IRSHAD", "DAKSHAT", "SALMAN"];
-const MECHANIC_CONTACTS = {
-  SONU: "7033558306",
-  KARTHIK: "7338386813",
-  MANMOHAN: "9956079799",
-  MANSUR: "7795047627",
-  IRSHAD: "6207176821",
-  DAKSHAT: "7829096931",
-  SALMAN: "7892335161",
-};
 
-const getMechanicContact = (name) => {
+const getMechanicContact = (name, overrides = {}) => {
   const key = String(name || "").trim();
   if (!key) return "";
-  return MECHANIC_CONTACTS[key] || MECHANIC_CONTACTS[key.toUpperCase()] || "";
+  const direct = overrides[key] || overrides[key.toUpperCase()];
+  if (direct) return String(direct);
+  const foundKey = Object.keys(overrides || {}).find(
+    (k) => String(k || "").toLowerCase() === key.toLowerCase()
+  );
+  return foundKey ? String(overrides[foundKey] || "") : "";
+};
+
+const normalizeBranchTeamList = (list) => {
+  if (!Array.isArray(list)) return [];
+  const seen = new Map();
+  list.forEach((entry) => {
+    if (!entry) return;
+    const name = String(entry.name || entry).trim();
+    if (!name) return;
+    const phone = String(entry.phone || entry.contact || entry.mobile || "").replace(/\D/g, "");
+    const key = name.toLowerCase();
+    if (!seen.has(key)) {
+      seen.set(key, phone ? { name, phone } : { name });
+    }
+  });
+  return Array.from(seen.values());
 };
 
 // Fuel Level (tabs)
@@ -123,82 +171,6 @@ const PRICE_BOOK = {
     { desc: "Water wash", rate: 150 },
   ],
 };
-
-// Vehicle catalog CSV (for auto Company/Model suggestions)
-const SHEET_CSV_URL =
-  import.meta.env.VITE_VEHICLE_SHEET_CSV_URL ||
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vQYGuNPY_2ivfS7MTX4bWiu1DWdF2mrHSCnmTznZVEHxNmsrgcGWjVZN4UDUTOzQQdXTnbeM-ylCJbB/pub?gid=408799621&single=true&output=csv";
-
-// Minimal CSV parser
-const parseCsv = (text) => {
-  const rows = [];
-  let row = [];
-  let col = "";
-  let inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    const n = text[i + 1];
-    if (c === '"' && !inQuotes) {
-      inQuotes = true;
-      continue;
-    }
-    if (c === '"' && inQuotes) {
-      if (n === '"') {
-        col += '"';
-        i++;
-        continue;
-      }
-      inQuotes = false;
-      continue;
-    }
-    if (c === "," && !inQuotes) {
-      row.push(col);
-      col = "";
-      continue;
-    }
-    if ((c === "\n" || c === "\r") && !inQuotes) {
-      if (col !== "" || row.length) {
-        row.push(col);
-        rows.push(row);
-        row = [];
-        col = "";
-      }
-      if (c === "\r" && n === "\n") i++;
-      continue;
-    }
-    col += c;
-  }
-  if (col !== "" || row.length) {
-    row.push(col);
-    rows.push(row);
-  }
-  return rows;
-};
-
-const VEH_HEADERS = {
-  company: ["Company", "Company Name"],
-  model: ["Model", "Model Name"],
-  variant: ["Variant"],
-};
-
-const vehPick = (row, keys) =>
-  String(
-    keys
-      .map((k) => row[k] ?? "")
-      .find((v) => v !== "") || ""
-  ).trim();
-
-const normalizeVehRow = (row = {}) => ({
-  company: vehPick(row, VEH_HEADERS.company),
-  model: vehPick(row, VEH_HEADERS.model),
-  variant: vehPick(row, VEH_HEADERS.variant),
-});
-
-const normalizeFallbackRow = (row = {}) => ({
-  company: String(row["Company Name"] || row.company || "").trim(),
-  model: String(row["Model Name"] || row.model || "").trim(),
-  variant: String(row["Variant"] || row.variant || "").trim(),
-});
 
 /* =========================
    UTILS
@@ -240,8 +212,35 @@ const toUpperSafe = (val) => (typeof val === "string" ? val.toUpperCase() : val)
 const upperFromEvent = (e) => toUpperSafe(e?.target?.value ?? e);
 const normalizeRowDesc = (rows) =>
   Array.isArray(rows) ? rows.map((r) => ({ ...r, desc: toUpperSafe(r?.desc || "") })) : [];
-const normalizeChassis = (val) =>
-  String(val || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 20);
+const isOtherLabourOption = (desc) => {
+  const n = normalizeKey(desc);
+  return n === "other" || n === "others";
+};
+
+const collectLabourCatalog = (serviceType, vehicleType) => {
+  const merged = [];
+  const push = (item) => {
+    if (!item) return;
+    const desc = toUpperSafe(String(item.desc || "").trim());
+    const rate = Number(item.rate || 0);
+    if (!desc) return;
+    merged.push({ desc, rate: Number.isFinite(rate) ? rate : 0 });
+  };
+
+  // Keep current context items first so their rate wins for duplicates.
+  buildRows(serviceType, vehicleType).forEach(push);
+  (PRICE_BOOK.Scooter?.base || []).forEach(push);
+  (PRICE_BOOK.Motorcycle?.base || []).forEach(push);
+  (PRICE_BOOK.paidAddons || []).forEach(push);
+
+  const seen = new Set();
+  return merged.filter((item) => {
+    const key = normalizeKey(item.desc);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
 
 // Build labour rows from selections
 function buildRows(serviceType, vehicleType) {
@@ -269,9 +268,10 @@ const POST_LOCK_EMPTY = { locked: false, at: null, mobile: null, amount: null, m
  * Optional: if not configured, act as offline success so UI continues (print, etc.).
  */
 async function submitJobcardWebhook(payload) {
-  if (!JOBCARD_GAS_URL) return { success: true, offline: true };
+  const webhookUrl = getJobcardGasUrl();
+  if (!webhookUrl) return { success: true, offline: true };
   const resp = await saveJobcardViaWebhook({
-    webhookUrl: JOBCARD_GAS_URL,
+    webhookUrl,
     method: 'POST',
     payload: { action: 'save', data: payload },
   });
@@ -302,13 +302,20 @@ function normalizeINPhone(raw) {
   return "";
 }
 
-function buildWelcomeMsg(vals, totals) {
+function buildWelcomeMsg(vals, totals, meta = {}) {
   const fmtDate =
     vals?.expectedDelivery ? dayjs(vals.expectedDelivery).format("DD-MM-YYYY HH:mm") : "—";
   const createdAt =
     vals?.createdAt ? dayjs(vals.createdAt).format("DD-MM-YYYY HH:mm") : "—";
-  // Always use logged-in user's phone; ignore any legacy mappings
-  const execPhone = getLoggedInPhone();
+  const execPhone = String(meta?.execPhone || "").replace(/\D/g, "");
+  const staffName = String(meta?.staffName || vals?.executive || "Team").trim();
+  const staffPhone = String(meta?.staffPhone || "").replace(/\D/g, "");
+  const mechanicName = String(meta?.mechanicName || vals?.mechanic || "").trim();
+  const mechanicPhone = String(meta?.mechanicPhone || "").replace(/\D/g, "");
+  const branchStaffPhones = Array.isArray(meta?.branchStaffPhones)
+    ? meta.branchStaffPhones.map((p) => String(p || "").replace(/\D/g, "")).filter(Boolean)
+    : [];
+  const branchStaffPhoneLine = branchStaffPhones.length ? branchStaffPhones.join(" / ") : "";
   const branch = vals?.branch || "—";
   const name = (vals?.custName ? String(vals.custName).trim() : "") || "Customer";
   const jc = vals?.jcNo || "—";
@@ -318,18 +325,9 @@ function buildWelcomeMsg(vals, totals) {
   const obsBlock = obsLines.length
     ? `*Customer Observations:*\n${obsLines.map((s) => `- ${s}`).join("\n")}\n\n`
     : "";
-  const mechanicName = (vals?.mechanic ? String(vals.mechanic).trim() : "") || "";
-  const mechanicPhone = mechanicName ? getMechanicContact(mechanicName) : "";
-  const mechanicBlock = mechanicName
-    ? `👷 Assigned Mechanic: ${mechanicName}${mechanicPhone ? ` (☎️ ${mechanicPhone})` : ""}\n`
-    : "";
 
-  const branchKey = String(branch || "")
-    .toLowerCase()
-    .replace(/[^a-z]/g, "");
-  const isNH = branchKey.includes("byadarahalli") || branchKey.includes("badrally");
-  const showroomEn = isNH ? "NH Motors" : "Shantha Motors";
-  const showroomKn = isNH ? "ಎನ್ ಎಚ್ ಮೋಟರ್ಸ್" : "ಶಾಂತ ಮೋಟರ್ಸ್";
+  const showroomEn = getOwnerOrgName() || "Motera";
+  const showroomKn = getOwnerOrgNameRegional() || "ಮೋಟೆರಾ";
 
   return (
     `Hi ${name}! 👋\n\n` +
@@ -340,8 +338,11 @@ function buildWelcomeMsg(vals, totals) {
     `🏍️ Vehicle: ${reg}\n` +
     `📅 Delivery Date: ${fmtDate}\n` +
     `💰 Estimated Cost (ಅಂದಾಜು ವೆಚ್ಚ): ${estimate}\n\n` +
-    mechanicBlock +
     obsBlock +
+    `${staffPhone ? `👤 Staff Contact: ${staffName} (☎️ ${staffPhone})\n` : ""}` +
+    `${mechanicName ? `🛠️ Allotted Mechanic: ${mechanicName}${mechanicPhone ? ` (☎️ ${mechanicPhone})` : ""}\n` : ""}` +
+    `${branchStaffPhoneLine ? `👥 Branch Staff Contact(s): ${branchStaffPhoneLine}\n` : ""}` +
+    `${staffPhone || mechanicName || branchStaffPhoneLine ? `\n` : ""}` +
     `ℹ️ Final prices may vary based on actual service needs.\n\n` +
     `Need any help? Just reply here.\n\n` +
     `— ${vals?.executive || "Team"}, ${branch}${execPhone ? ` (☎️ ${execPhone})` : ""}`
@@ -424,12 +425,6 @@ function buildPostServiceMsg(vals, totals, labourRows, paymentsSummary = {}) {
   const branch = vals?.branch || "—";
   const exec = vals?.executive || "Team";
   const execPhone = getLoggedInPhone();
-  const branchKey = String(branch || "")
-    .toLowerCase()
-    .replace(/[^a-z]/g, "");
-  const isNH = branchKey.includes("byadarahalli") || branchKey.includes("badrally");
-  const brandEn = isNH ? "NH Motors" : "Shantha Motors";
-  const brandKn = isNH ? "ಎನ್ ಎಚ್ ಮೋಟರ್ಸ್" : "ಶಾಂತ ಮೋಟರ್ಸ್";
 
   const now = dayjs().format('DD-MM-YYYY HH:mm');
   const line = (s) => String(s || '').replace(/\s+/g, ' ').trim();
@@ -487,8 +482,9 @@ function buildPostServiceMsg(vals, totals, labourRows, paymentsSummary = {}) {
   ];
 
   // Final WhatsApp message following the requested template
+  const orgName = getOwnerOrgName() || "Motera";
   const lines = [
-    `⭐️ *${brandEn}* — ${brandKn}`,
+    `⭐️ *${orgName}*`,
     `Multi Brand Two Wheeler Sales & Service`,
     `────────────────────────`,
     `*✔️ Service Invoice*`,
@@ -516,7 +512,7 @@ function buildPostServiceMsg(vals, totals, labourRows, paymentsSummary = {}) {
     ``,
     `────────────────────────`,
     ``,
-    `🙏 Thank you for choosing *${brandEn}*!`,
+    `🙏 Thank you for choosing *${orgName}*!`,
     `ಧನ್ಯವಾದಗಳು ❤️`,
     `— ${exec}, ${branch}${execPhone ? ` (☎️ ${execPhone})` : ''}`,
   ];
@@ -529,6 +525,9 @@ function buildPostServiceMsg(vals, totals, labourRows, paymentsSummary = {}) {
    ========================= */
 
 export default function JobCard({ initialValues = null } = {}) {
+  const JOBCARD_GAS_URL = getJobcardGasUrl();
+  const VEHICLE_CATALOG_GAS_URL = getVehicleCatalogGasUrl();
+  const ORG_NAME = getOwnerOrgName() || "Motera";
   const location = useLocation();
   const [form] = Form.useForm();
   const [, setUserStaffName] = useState();
@@ -541,6 +540,65 @@ export default function JobCard({ initialValues = null } = {}) {
   const [branchCode, setBranchCode] = useState("");
   const [branchId, setBranchId] = useState("");
   const [execOptions, setExecOptions] = useState([]); // [{name, phone}]
+  const [branchTeam, setBranchTeam] = useState({ executives: [], mechanics: [] });
+
+  const ownerMechanics = useMemo(() => normalizeBranchTeamList(getOwnerMechanics()), []);
+  const branchExecutives = useMemo(() => normalizeBranchTeamList(branchTeam?.executives), [branchTeam]);
+  const branchMechanics = useMemo(() => normalizeBranchTeamList(branchTeam?.mechanics), [branchTeam]);
+  const combinedExecOptions = useMemo(() => {
+    const map = new Map();
+    branchExecutives.forEach((item) => {
+      if (!item?.name) return;
+      map.set(item.name, item);
+    });
+    execOptions.forEach((item) => {
+      if (!item?.name) return;
+      if (!map.has(item.name)) map.set(item.name, item);
+    });
+    return Array.from(map.values());
+  }, [branchExecutives, execOptions]);
+  const execSelectOptions = useMemo(
+    () =>
+      combinedExecOptions.map((item) => ({
+        value: item.name,
+        label: item.phone ? `${item.name} (${item.phone})` : item.name,
+      })),
+    [combinedExecOptions]
+  );
+  const resolveExecutivePhone = useCallback((execName) => {
+    const target = String(execName || "").trim().toLowerCase();
+    if (!target) return "";
+    const found = (combinedExecOptions || []).find(
+      (item) => String(item?.name || "").trim().toLowerCase() === target
+    );
+    const phone = String(found?.phone || "").replace(/\D/g, "");
+    if (phone) return phone;
+    return "";
+  }, [combinedExecOptions]);
+  const mechanicSelectList = useMemo(() => {
+    const names = new Set();
+    branchMechanics.forEach((item) => {
+      if (item?.name) names.add(item.name);
+    });
+    ownerMechanics.forEach((item) => {
+      if (item?.name) names.add(item.name);
+    });
+    return Array.from(names);
+  }, [branchMechanics, ownerMechanics]);
+  const branchMechanicContactMap = useMemo(() => {
+    const map = {};
+    ownerMechanics.forEach((item) => {
+      if (item?.name && item?.phone) {
+        map[item.name] = item.phone;
+      }
+    });
+    branchMechanics.forEach((item) => {
+      if (item?.name && item?.phone) {
+        map[item.name] = item.phone;
+      }
+    });
+    return map;
+  }, [branchMechanics, ownerMechanics]);
   // Optimistic outbox for background sync
   const OUTBOX_KEY = 'JobCard:outbox';
   const SAVE_COOLDOWN_MS = 6000;
@@ -566,6 +624,16 @@ export default function JobCard({ initialValues = null } = {}) {
   const [postOpen, setPostOpen] = useState(false);
   const [prePrinting, setPrePrinting] = useState(false); // lock Pre-service print
   const [postSaving, setPostSaving] = useState(false); // lock Post-service save/print
+  const [ownerLocationQrUrl, setOwnerLocationQrUrl] = useState(() => {
+    try {
+      const raw = localStorage.getItem("user");
+      const u = raw ? JSON.parse(raw) : null;
+      const cfg = u?.ownerConfig || u?.metadata?.ownerConfig || u?.owner?.ownerConfig || {};
+      return resolveLocationQrImageUrl(cfg?.locationQrUrl || "");
+    } catch {
+      return "";
+    }
+  });
   const [whatsAppOpen, setWhatsAppOpen] = useState(false);
   const [whatsAppStep, setWhatsAppStep] = useState(1);
   const [whatsAppDone, setWhatsAppDone] = useState({ customer: false, mechanic: false, pre: false });
@@ -589,9 +657,13 @@ export default function JobCard({ initialValues = null } = {}) {
   const [inlineFetchLoading, setInlineFetchLoading] = useState(false);
   const [inlineFetchTarget, setInlineFetchTarget] = useState(null);
   const lastAutoRegRef = useRef("");
-  const lastAutoMobileRef = useRef("");
+  const autoFetchTimerRef = useRef(null);
+  const regInputSourceRef = useRef("init");
   const [bikeData, setBikeData] = useState([]);
-  const [selectedCompany, setSelectedCompany] = useState("");
+  const setRegDisplayProgrammatic = (val) => {
+    regInputSourceRef.current = "program";
+    setRegDisplay(val);
+  };
   const startActionCooldown = (ms = 6000) => {
     const until = Date.now() + ms;
     setActionCooldownUntil(until);
@@ -652,6 +724,23 @@ export default function JobCard({ initialValues = null } = {}) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { const onOnline = () => retryOutbox(); window.addEventListener('online', onOnline); return () => window.removeEventListener('online', onOnline); }, []);
 
+  // Keep local user/owner config fresh so print sheets read latest owner profile values.
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await GetCurrentUser().catch(() => null);
+        if (res?.success && res?.data) {
+          try { localStorage.setItem("user", JSON.stringify(res.data)); } catch { /* ignore */ }
+          const cfg = res.data?.ownerConfig || res.data?.metadata?.ownerConfig || res.data?.owner?.ownerConfig || {};
+          const nextQr = resolveLocationQrImageUrl(cfg?.locationQrUrl || "");
+          setOwnerLocationQrUrl(nextQr);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  }, []);
+
   const recomputeReady = () => {
     const valsNow = form.getFieldsValue(true);
     const req = requiredWithDynamic(valsNow);
@@ -684,11 +773,13 @@ export default function JobCard({ initialValues = null } = {}) {
   };
   // ★ end required field helpers
 
+  const getExpectedDeliveryDefault = useCallback(() => dayjs().startOf("day"), []);
+
   const initialFormValues = useMemo(
     () => ({
       jcNo: "",
       createdAt: dayjs(),
-      expectedDelivery: dayjs(),
+      expectedDelivery: getExpectedDeliveryDefault(),
       branch: undefined,
       executive: undefined,
       mechanic: "",
@@ -710,7 +801,7 @@ export default function JobCard({ initialValues = null } = {}) {
       gstLabour: DEFAULT_GST_LABOUR,
       discounts: { labour: 0 },
     }),
-    []
+    [getExpectedDeliveryDefault]
   );
 
   const initialFromQuery = useMemo(() => {
@@ -724,8 +815,7 @@ export default function JobCard({ initialValues = null } = {}) {
       const colour = toUpperSafe(params.get("colour") || params.get("color") || "");
       const custName = toUpperSafe(params.get("custName") || params.get("customerName") || "");
       const custMobile = params.get("custMobile") || params.get("mobile") || "";
-      const chassisNo = normalizeChassis(params.get("chassisNo") || params.get("chassis") || "");
-      const hasAny = [regNo, company, model, colour, chassisNo, custName, custMobile].some((v) => String(v || "").trim());
+      const hasAny = [regNo, company, model, colour, custName, custMobile].some((v) => String(v || "").trim());
       if (!hasAny) return null;
       return {
         formValues: {
@@ -733,7 +823,6 @@ export default function JobCard({ initialValues = null } = {}) {
           company,
           model,
           colour,
-          chassisNo,
           custName,
           custMobile: String(custMobile || "").replace(/\D/g, "").slice(-10),
         },
@@ -770,47 +859,6 @@ export default function JobCard({ initialValues = null } = {}) {
     }
   }, [location?.search]);
 
-  // Load vehicle catalog for Company/Model suggestions
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const res = await fetch(SHEET_CSV_URL, { cache: "no-store" });
-        if (!res.ok) throw new Error("sheet fetch failed");
-        const csv = await res.text();
-        if (csv.trim().startsWith("<")) throw new Error("expected CSV, got HTML");
-        const rows = parseCsv(csv);
-        if (!rows.length) throw new Error("empty sheet");
-        const headers = rows[0].map((h) => (h || "").trim());
-        const data = rows.slice(1).map((r) => {
-          const obj = {};
-          headers.forEach((h, i) => (obj[h] = r[i] ?? ""));
-          return obj;
-        });
-        const cleaned = data
-          .map(normalizeVehRow)
-          .filter((r) => r.company && r.model);
-        if (!cancelled) setBikeData(cleaned);
-      } catch {
-        try {
-          const res2 = await fetch("/bikeData.json", { cache: "no-store" });
-          if (!res2.ok) throw new Error("fallback missing");
-          const data = await res2.json();
-          const cleaned = (Array.isArray(data) ? data : [])
-            .map(normalizeFallbackRow)
-            .filter((r) => r.company && r.model);
-          if (!cancelled) setBikeData(cleaned);
-        } catch {
-          // silent; company/model can be typed manually
-        }
-      }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   // Apply external initial values (when rendered in a modal)
   useEffect(() => {
     const sourceInit = initialValues || initialFromQuery;
@@ -818,16 +866,16 @@ export default function JobCard({ initialValues = null } = {}) {
     try {
       const fv = sourceInit.formValues || sourceInit;
       const parseDay = (v) => {
-        if (!v) return dayjs();
+        if (!v) return null;
         const d = dayjs(v, ["DD-MM-YYYY HH:mm","DD-MM-YYYY","DD/MM/YYYY","YYYY-MM-DD", dayjs.ISO_8601], true);
         return d.isValid() ? d : null;
       };
       const kmVal = fv.km ? `${String(fv.km).replace(/\D/g,'')} KM` : '';
       const regNo = formatReg(fv.regNo || '', '');
       const company = toUpperSafe(fv.company || '');
+      const chassisNo = toUpperSafe(fv.chassisNo || fv.chassis || '');
       const model = toUpperSafe(fv.model || '');
       const colour = toUpperSafe(fv.colour || '');
-      const chassisNo = normalizeChassis(fv.chassisNo || fv.chassis || '');
       const custName = toUpperSafe(fv.custName || '');
       const obsVal = toUpperSafe((fv.obs || '').replace(/\s*#\s*/g, "\n"));
       const fields = {
@@ -835,12 +883,12 @@ export default function JobCard({ initialValues = null } = {}) {
         branch: fv.branch || undefined,
         mechanic: fv.mechanic || undefined,
         executive: fv.executive || undefined,
-        expectedDelivery: parseDay(fv.expectedDelivery),
+        expectedDelivery: parseDay(fv.expectedDelivery) || getExpectedDeliveryDefault(),
         regNo,
         company,
+        chassisNo,
         model,
         colour,
-        chassisNo,
         km: kmVal,
         fuelLevel: fv.fuelLevel || undefined,
         
@@ -859,13 +907,12 @@ export default function JobCard({ initialValues = null } = {}) {
         ),
       };
       form.setFieldsValue(fields);
-      setRegDisplay(fields.regNo || '');
-      if (company) setSelectedCompany(company);
+      setRegDisplayProgrammatic(fields.regNo || '');
       setServiceTypeLocal(fv.serviceType || null);
       setVehicleTypeLocal(fv.vehicleType || null);
     } catch { /* ignore */ }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialValues, initialFromQuery]);
+  }, [initialValues, initialFromQuery, getExpectedDeliveryDefault]);
 
   // Prefill executive + branch from logged-in user (staff)
   useEffect(() => {
@@ -905,10 +952,11 @@ export default function JobCard({ initialValues = null } = {}) {
                 const res = await listBranchesPublic({ status: 'active', limit: 500 });
                 if (res?.success && Array.isArray(res?.data?.items)) {
                   const activeBranches = res.data.items.filter((b) => String(b?.status || '').toLowerCase() === 'active');
-                  const all = activeBranches.map((b) => ({
+                const all = activeBranches.map((b) => ({
                     id: String(b.id || b._id || ''),
                     name: toCaps(b.name),
                     code: b.code ? String(b.code).toUpperCase() : '',
+                    team: b.team || {},
                   }));
                   setAllowedBranches(all);
                 }
@@ -923,17 +971,23 @@ export default function JobCard({ initialValues = null } = {}) {
             } else {
               // Staff: only own + additional branches
               const list = [];
-              const push = (b) => {
-                if (!b) return;
-                const statusLc = typeof b === 'string' ? '' : String(b?.status || '').toLowerCase();
-                if (statusLc && statusLc !== 'active') return;
-                const id = (b && (b._id || b.id || b.$oid || b)) || '';
-                const nameRaw = typeof b === 'string' ? '' : (b?.name || '');
-                const name = toCaps(nameRaw);
-                const code = typeof b === 'string' ? '' : (b?.code || '');
-                if (!id || !name) return;
-                list.push({ id: String(id), name: String(name), code: code ? String(code).toUpperCase() : '' });
-              };
+                const push = (b) => {
+                  if (!b) return;
+                  const statusLc = typeof b === 'string' ? '' : String(b?.status || '').toLowerCase();
+                  if (statusLc && statusLc !== 'active') return;
+                  const id = (b && (b._id || b.id || b.$oid || b)) || '';
+                  const nameRaw = typeof b === 'string' ? '' : (b?.name || '');
+                  const name = toCaps(nameRaw);
+                  const code = typeof b === 'string' ? '' : (b?.code || '');
+                  if (!id || !name) return;
+                  const team = typeof b === 'object' ? (b.team || {}) : {};
+                  list.push({
+                    id: String(id),
+                    name: String(name),
+                    code: code ? String(code).toUpperCase() : '',
+                    team,
+                  });
+                };
               if (user?.primaryBranch) push(user.primaryBranch);
               if (Array.isArray(user?.branches)) user.branches.forEach(push);
               const seen = new Set();
@@ -950,22 +1004,26 @@ export default function JobCard({ initialValues = null } = {}) {
           const branchIdVar = (user?.formDefaults && (user.formDefaults.branchId?._id || user.formDefaults.branchId || null))
             || (user?.primaryBranch && (user.primaryBranch?._id || user.primaryBranch || null))
             || (Array.isArray(user?.branches) && user.branches.length ? (user.branches[0]?._id || user.branches[0] || null) : null);
-          if (branchIdVar) {
-            try {
-              const br = await getBranch(String(branchIdVar)).catch(() => null);
-              if (br?.success && br?.data) {
-                if (!branchName) branchName = br.data.name;
-                if (br?.data?.code && !branchCode) {
-                  const code = String(br.data.code).toUpperCase();
-                  setBranchCode(code);
-                  setBranchId(String(br.data.id || branchIdVar));
-                  try { form.setFieldsValue({ branchCode: code }); } catch {
-                    //aoibfiha
+              if (branchIdVar) {
+                try {
+                  const br = await getBranch(String(branchIdVar)).catch(() => null);
+                  if (br?.success && br?.data) {
+                    if (!branchName) branchName = br.data.name;
+                    if (br?.data?.code && !branchCode) {
+                      const code = String(br.data.code).toUpperCase();
+                      setBranchCode(code);
+                      setBranchId(String(br.data.id || branchIdVar));
+                      try { form.setFieldsValue({ branchCode: code }); } catch {
+                        //aoibfiha
+                      }
+                    }
+                    if (br.data.team && Object.keys(br.data.team).length) {
+                      setBranchTeam(br.data.team);
+                      attachTeamToBranch(br.data.id, br.data.team);
+                    }
                   }
-                }
+                } catch { /* ignore */ }
               }
-            } catch { /* ignore */ }
-          }
           if (staffName) setUserStaffName(staffName);
           if (role) setUserRole(role);
           // Only set defaults if fields are empty to avoid overwriting
@@ -992,12 +1050,47 @@ export default function JobCard({ initialValues = null } = {}) {
     return m;
   }, [allowedBranches]);
 
+  const attachTeamToBranch = useCallback((branchId, team) => {
+    if (!branchId) return;
+    setAllowedBranches((prev) => {
+      const idx = prev.findIndex((item) => String(item.id) === String(branchId));
+      if (idx === -1) return prev;
+      const next = [...prev];
+      next[idx] = { ...next[idx], team: team || {} };
+      return next;
+    });
+  }, []);
+
+  const fetchBranchTeam = useCallback(async (branchId) => {
+    if (!branchId) {
+      setBranchTeam({ executives: [], mechanics: [] });
+      return;
+    }
+    try {
+      const res = await getBranch(String(branchId));
+      if (res?.success && res?.data) {
+        const team = res.data.team || {};
+        setBranchTeam(team);
+        attachTeamToBranch(res.data.id, team);
+      }
+    } catch {
+      setBranchTeam({ executives: [], mechanics: [] });
+    }
+  }, [attachTeamToBranch]);
+
   const onBranchChange = (name) => {
     try {
       const key = String(name || '').toLowerCase();
       const b = branchMapByName.get(key);
       if (b) {
         setBranchId(b.id);
+        if (b.team && Object.keys(b.team).length) {
+          setBranchTeam(b.team);
+          attachTeamToBranch(b.id, b.team);
+        } else {
+          setBranchTeam({ executives: [], mechanics: [] });
+          if (b.id) fetchBranchTeam(b.id);
+        }
         if (b.code) setBranchCode(String(b.code).toUpperCase());
         try { form.setFieldsValue({ branch: b.name, branchCode: b.code ? String(b.code).toUpperCase() : undefined }); } catch {
           //dfn
@@ -1011,11 +1104,21 @@ export default function JobCard({ initialValues = null } = {}) {
   // If branch/executive ever get cleared by a reset, restore from defaults
   const watchedBranch = Form.useWatch('branch', form);
   const watchedExec = Form.useWatch('executive', form);
-  const isNHBranch = String(watchedBranch || defaultBranchName || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '')
-    .includes('byadarahalli');
+  useEffect(() => {
+    const key = String(watchedBranch || '').toLowerCase();
+    const branch = branchMapByName.get(key);
+    if (branch) {
+      if (branch.team && Object.keys(branch.team).length) {
+        setBranchTeam(branch.team);
+      } else if (branch.id) {
+        fetchBranchTeam(branch.id);
+      } else {
+        setBranchTeam({ executives: [], mechanics: [] });
+      }
+    } else {
+      setBranchTeam({ executives: [], mechanics: [] });
+    }
+  }, [watchedBranch, branchMapByName, fetchBranchTeam]);
   useEffect(() => {
     const patch = {};
     if (!watchedBranch && defaultBranchName) patch.branch = defaultBranchName;
@@ -1037,6 +1140,113 @@ export default function JobCard({ initialValues = null } = {}) {
     return Boolean(String(pendingBranch || '').trim());
   }, [userRole, pendingBranch]);
   const pendingCount = pendingLoaded ? pendingItems.length : null;
+
+  // Load vehicle catalog for Company/Model suggestions
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        let cleaned = [];
+        if (VEHICLE_CATALOG_GAS_URL) {
+          try {
+            const resp = await saveBookingViaWebhook({
+              webhookUrl: VEHICLE_CATALOG_GAS_URL,
+              method: "GET",
+              payload: { action: "list" },
+            });
+            const js = resp?.data || resp;
+            const rows = Array.isArray(js?.rows)
+              ? js.rows
+              : Array.isArray(js?.data)
+              ? js.data
+              : Array.isArray(js)
+              ? js
+              : [];
+            cleaned = rows.map(normalizeCatalogRow).filter((r) => r.company && r.model);
+          } catch {
+            cleaned = [];
+          }
+        }
+
+        if (!cleaned.length) {
+          const raw = await fetchSheetRowsCSV(CATALOG_CSV_URL);
+          cleaned = raw.map(normalizeCatalogRow).filter((r) => r.company && r.model);
+        }
+
+        if (!cancelled) {
+          setBikeData(cleaned);
+        }
+      } catch {
+        if (!cancelled) {
+          setBikeData([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const watchedCompany = Form.useWatch("company", form);
+
+  const companies = useMemo(
+    () => uniqCaseInsensitive(bikeData.map((r) => r.company)),
+    [bikeData]
+  );
+  const models = useMemo(() => {
+    const compKey = normalizeKey(watchedCompany);
+    const base = compKey
+      ? bikeData.filter((r) => normalizeKey(r.company) === compKey)
+      : bikeData;
+    return uniqCaseInsensitive(base.map((r) => r.model));
+  }, [bikeData, watchedCompany]);
+  const companyOptions = useMemo(
+    () => companies.map((c) => ({ value: String(c || "").toUpperCase() })),
+    [companies]
+  );
+  const modelOptions = useMemo(
+    () => models.map((m) => ({ value: String(m || "").toUpperCase() })),
+    [models]
+  );
+  const labourCatalog = useMemo(
+    () => collectLabourCatalog(serviceTypeLocal, vehicleTypeLocal),
+    [serviceTypeLocal, vehicleTypeLocal]
+  );
+  const labourDescOptions = useMemo(
+    () =>
+      labourCatalog.map((item) => ({
+        value: item.desc,
+        label: `${item.desc} (₹${Math.round(Number(item.rate || 0))})`,
+      })).filter((item) => !isOtherLabourOption(item.value)),
+    [labourCatalog]
+  );
+  const labourRateByDesc = useMemo(
+    () =>
+      labourCatalog.reduce((acc, item) => {
+        acc[normalizeKey(item.desc)] = Number(item.rate || 0);
+        return acc;
+      }, {}),
+    [labourCatalog]
+  );
+  const applyMatchedLabourRate = useCallback(
+    (rowIndex, rawDesc) => {
+      const desc = toUpperSafe(String(rawDesc || "").trim());
+      if (!desc) return;
+      const matchedRate = labourRateByDesc[normalizeKey(desc)];
+      if (!Number.isFinite(matchedRate)) return;
+      const rows = Array.isArray(form.getFieldValue("labourRows"))
+        ? [...form.getFieldValue("labourRows")]
+        : [];
+      if (!rows[rowIndex]) rows[rowIndex] = { qty: 1 };
+      rows[rowIndex] = {
+        ...rows[rowIndex],
+        desc,
+        rate: matchedRate,
+      };
+      form.setFieldsValue({ labourRows: rows });
+    },
+    [form, labourRateByDesc]
+  );
 
   const normalizePendingRow = (row) => {
     const values = row?.values || row || {};
@@ -1143,43 +1353,47 @@ export default function JobCard({ initialValues = null } = {}) {
   const handleRegChange = (e) => {
     const next = formatReg(e.target.value, regDisplay);
     setRegDisplay(next);
+    regInputSourceRef.current = "user";
     form.setFieldsValue({ regNo: next });
-    if (String(next || "").length < 10) {
+    if (!REGEX_FULL.test(next)) {
       lastAutoRegRef.current = "";
+      if (autoFetchTimerRef.current) {
+        clearTimeout(autoFetchTimerRef.current);
+        autoFetchTimerRef.current = null;
+      }
+      return;
     }
+    if (inlineFetchLoading) return;
+    if (lastAutoRegRef.current === next) return;
+    if (autoFetchTimerRef.current) clearTimeout(autoFetchTimerRef.current);
+    autoFetchTimerRef.current = setTimeout(() => {
+      const regNow = formatReg(form.getFieldValue("regNo") || "", next || "");
+      if (!REGEX_FULL.test(regNow)) return;
+      if (inlineFetchLoading) return;
+      if (lastAutoRegRef.current === regNow) return;
+      lastAutoRegRef.current = regNow;
+      regInputSourceRef.current = "auto";
+      triggerInlineFetch("vehicle");
+    }, 300);
   };
 
-  const isRegValid = REGEX_FULL.test(
-    formatReg(regDisplay || form.getFieldValue("regNo") || "", regDisplay || "")
-  );
+  // Clean up any pending auto-fetch timer on unmount
+  useEffect(() => {
+    return () => {
+      if (autoFetchTimerRef.current) {
+        clearTimeout(autoFetchTimerRef.current);
+        autoFetchTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const labourRowsRaw = Form.useWatch("labourRows", form);
   const labourRows = useMemo(() => normalizeRowDesc(labourRowsRaw || []), [labourRowsRaw]);
+  const kmWatch = Form.useWatch("km", form);
   const gstLabour = Form.useWatch("gstLabour", form) ?? DEFAULT_GST_LABOUR;
   const discountsRaw = Form.useWatch("discounts", form);
   const discounts = useMemo(() => discountsRaw || { labour: 0 }, [discountsRaw]);
-  const kmWatch = Form.useWatch("km", form);
-  const companyWatch = Form.useWatch("company", form);
-  const mobileWatch = Form.useWatch("custMobile", form);
 
-  useEffect(() => {
-    const next = formatReg(regDisplay || form.getFieldValue("regNo") || "", regDisplay || "");
-    if (String(next || "").length < 10) return;
-    if (!REGEX_FULL.test(next)) return;
-    if (inlineFetchLoading) return;
-    if (lastAutoRegRef.current === next) return;
-    lastAutoRegRef.current = next;
-    triggerInlineFetch("vehicle");
-  }, [regDisplay, inlineFetchLoading, form]);
-
-  useEffect(() => {
-    const mobile = String(mobileWatch || "").replace(/\D/g, "").slice(-10);
-    if (mobile.length !== 10) return;
-    if (inlineFetchLoading) return;
-    if (lastAutoMobileRef.current === mobile) return;
-    lastAutoMobileRef.current = mobile;
-    triggerInlineFetch("mobile");
-  }, [mobileWatch, inlineFetchLoading]);
   const totals = useMemo(() => {
     const labourSub = labourRows.reduce(
       (sum, r) => sum + Number(r?.qty || 0) * Number(r?.rate || 0),
@@ -1190,24 +1404,6 @@ export default function JobCard({ initialValues = null } = {}) {
     const grand = Math.max(0, labourSub + labourGST - labourDisc);
     return { labourSub, labourGST, labourDisc, grand };
   }, [labourRows, gstLabour, discounts]);
-
-  const companies = useMemo(
-    () => uniqCaseInsensitive(bikeData.map((r) => r.company)),
-    [bikeData]
-  );
-  const models = useMemo(() => {
-    const compKey = normalizeKey(companyWatch || selectedCompany);
-    const base = compKey
-      ? bikeData.filter((r) => normalizeKey(r.company) === compKey)
-      : bikeData;
-    return uniqCaseInsensitive(base.map((r) => r.model));
-  }, [bikeData, companyWatch, selectedCompany]);
-
-  useEffect(() => {
-    if (companyWatch && companyWatch !== selectedCompany) {
-      setSelectedCompany(companyWatch);
-    }
-  }, [companyWatch, selectedCompany]);
 
   const postLockTimeLabel = useMemo(() => {
     const raw = postServiceLock.at;
@@ -1226,6 +1422,12 @@ export default function JobCard({ initialValues = null } = {}) {
   }, [postPay1Amt, postPay2Amt]);
   const postPayablePreview = useMemo(() => Math.round(Number(totals?.grand || 0)), [totals]);
   const postDuePreview = useMemo(() => postPayablePreview - postCollectedPreview, [postCollectedPreview, postPayablePreview]);
+  const isRegComplete = REGEX_FULL.test(
+    formatReg(regDisplay || form.getFieldValue("regNo") || "", regDisplay || "")
+  );
+  const kmDigits = String(kmWatch || "").replace(/\D/g, "");
+  const kmValue = Number(kmDigits || 0);
+  const isFreeDisabled = Number.isFinite(kmValue) && kmValue > 10000;
 
   const handleKmKeyPress = (e) => { if (!/[0-9]/.test(e.key)) e.preventDefault(); };
   const handleMobileKeyPress = (e) => { if (!/[0-9]/.test(e.key)) e.preventDefault(); };
@@ -1237,13 +1439,7 @@ export default function JobCard({ initialValues = null } = {}) {
       setPostServiceLock(POST_LOCK_EMPTY);
     }
     form.setFieldsValue({ custMobile: val });
-    if (String(val || "").length < 10) {
-      lastAutoMobileRef.current = "";
-    }
   };
-
-  const kmDigits = Number(String(kmWatch || "").replace(/\D/g, "")) || 0;
-  const freeDisabled = kmDigits > 10000;
 
   const triggerInlineFetch = (mode) => {
     if (mode === "vehicle") {
@@ -1287,7 +1483,7 @@ export default function JobCard({ initialValues = null } = {}) {
   const serviceOptions = SERVICE_TYPES.map((t) => ({
     label: t,
     value: t,
-    disabled: t === "Free" && freeDisabled,
+    disabled: t === "Free" && isFreeDisabled,
   }));
 
   const normalizeFormValues = (rawVals = {}) => {
@@ -1296,23 +1492,31 @@ export default function JobCard({ initialValues = null } = {}) {
     next.company = toUpperSafe(next.company || "");
     next.model = toUpperSafe(next.model || "");
     next.colour = toUpperSafe(next.colour || "");
-    next.chassisNo = normalizeChassis(next.chassisNo || next.chassis || "");
+    next.chassisNo = toUpperSafe(next.chassisNo || "");
     next.custName = toUpperSafe(next.custName || "");
     next.obs = toUpperSafe(next.obs || "");
     next.labourRows = normalizeRowDesc(next.labourRows || []);
     return next;
   };
 
+  useEffect(() => {
+    if (!isFreeDisabled) return;
+    if (serviceTypeLocal !== "Free") return;
+    setServiceTypeLocal(null);
+    form.setFieldsValue({ serviceType: undefined, labourRows: [] });
+    message.warning("Free service is disabled when odometer is above 10,000 KM.");
+    recomputeReady();
+  }, [isFreeDisabled, serviceTypeLocal]);
+
   const handleServiceCheckbox = (checkedValues) => {
+    if (isFreeDisabled && checkedValues.includes("Free")) {
+      message.warning("Free service is disabled when odometer is above 10,000 KM.");
+      return;
+    }
     let next = null;
     if (checkedValues.length === 0) next = null;
     else if (checkedValues.length === 1) next = checkedValues[0];
     else next = checkedValues.find((v) => v !== serviceTypeLocal) || checkedValues[0];
-
-    if (freeDisabled && next === "Free") {
-      message.warning("Free service is not allowed above 10,000 KM.");
-      return;
-    }
 
     setServiceTypeLocal(next || null);
     form.setFieldsValue({ serviceType: next || undefined });
@@ -1333,15 +1537,6 @@ export default function JobCard({ initialValues = null } = {}) {
     }
     recomputeReady(); // ★ keep button state fresh
   };
-
-  useEffect(() => {
-    if (freeDisabled && serviceTypeLocal === "Free") {
-      setServiceTypeLocal(null);
-      form.setFieldsValue({ serviceType: undefined });
-      recomputeReady();
-      message.warning("Free service disabled for odometer above 10,000 KM.");
-    }
-  }, [freeDisabled, serviceTypeLocal, form]);
 
   useEffect(() => {
     recomputeReady(); // ★ on mount
@@ -1482,6 +1677,15 @@ export default function JobCard({ initialValues = null } = {}) {
         message.error('Enter a valid 10-digit mobile number.');
         return;
       }
+      const regNo = formatReg(valsNow.regNo || "", regDisplay || "");
+      if (!REGEX_FULL.test(regNo)) {
+        form.setFields([{ name: "regNo", errors: ["Format must be KA05DB6000 (AA##AA####)"] }]);
+        message.error("Enter vehicle no. in format KA05DB6000.");
+        return;
+      }
+      valsNow.regNo = regNo;
+      form.setFieldsValue({ regNo });
+      setRegDisplayProgrammatic(regNo);
 
       // Ensure JC number exists (reserve by mobile if missing)
       let jcNo = valsNow.jcNo;
@@ -1594,7 +1798,7 @@ export default function JobCard({ initialValues = null } = {}) {
           custMobile: mobile10,
           branch: String(valsNow.branch || ''),
           executive: String(valsNow.executive || ''),
-          regNo: String(valsNow.regNo || ''),
+          regNo: regNo,
           company: String(valsNow.company || ''),
           serviceType: String(valsNow.serviceType || ''),
           vehicleType: String(valsNow.vehicleType || ''),
@@ -1678,7 +1882,7 @@ export default function JobCard({ initialValues = null } = {}) {
         const fresh = {
           ...initialFormValues,
           createdAt: dayjs(),
-          expectedDelivery: null,
+          expectedDelivery: getExpectedDeliveryDefault(),
           branch: defaultBranchName || undefined,
           executive: defaultExecutiveName || undefined,
           jcNo: '',
@@ -1689,7 +1893,7 @@ export default function JobCard({ initialValues = null } = {}) {
         form.setFieldsValue(fresh);
         setServiceTypeLocal(null);
         setVehicleTypeLocal(null);
-        setRegDisplay('');
+        setRegDisplayProgrammatic('');
         setFollowUpEnabled(false);
         setFollowUpAt(null);
         setFollowUpNotes('');
@@ -1709,6 +1913,12 @@ export default function JobCard({ initialValues = null } = {}) {
       setPostSaving(false);
     }
   };
+
+  const watchedExpectedDelivery = Form.useWatch("expectedDelivery", form);
+  useEffect(() => {
+    if (watchedExpectedDelivery) return;
+    form.setFieldsValue({ expectedDelivery: getExpectedDeliveryDefault() });
+  }, [watchedExpectedDelivery, form, getExpectedDeliveryDefault]);
 
   // Pull everything we need for printing
   const vals = normalizeFormValues(form.getFieldsValue(true));
@@ -1747,7 +1957,23 @@ export default function JobCard({ initialValues = null } = {}) {
         message.error("Enter a valid 10-digit mobile number (India).");
         return;
       }
-      const msg = buildWelcomeMsg(valsNow, totals);
+      const mechanicName = String(valsNow?.mechanic || "").trim();
+      const mechanicPhone = getMechanicContact(mechanicName, branchMechanicContactMap);
+      const branchStaffPhones = Array.from(
+        new Set(
+          (branchExecutives || [])
+            .map((item) => String(item?.phone || "").replace(/\D/g, ""))
+            .filter(Boolean)
+        )
+      );
+      const msg = buildWelcomeMsg(valsNow, totals, {
+        execPhone: resolveExecutivePhone(valsNow?.executive),
+        staffName: valsNow?.executive || "Team",
+        staffPhone: getLoggedInPhone(),
+        mechanicName,
+        mechanicPhone,
+        branchStaffPhones,
+      });
       message.loading({ key: "share", content: "Preparing WhatsApp message…" });
       const result = openWhatsAppOrSMS({
         mobileE164,
@@ -1789,7 +2015,7 @@ export default function JobCard({ initialValues = null } = {}) {
       await form.validateFields(["mechanic"]); // ensure mechanic is selected
 
       const mechanicName = String(valsNow.mechanic || "").trim();
-      const mechanicPhoneRaw = getMechanicContact(mechanicName);
+      const mechanicPhoneRaw = getMechanicContact(mechanicName, branchMechanicContactMap);
       const mechanicE164 = normalizeINPhone(mechanicPhoneRaw);
       if (!mechanicE164) {
         message.error(
@@ -1912,7 +2138,7 @@ export default function JobCard({ initialValues = null } = {}) {
           >
             <div>
               <Title level={4} style={{ margin: 0 }}>
-                {isNHBranch ? "NH MOTORS — JOB CARD" : "SHANTHA MOTORS — JOB CARD"}
+                {String(ORG_NAME || "Motera").toUpperCase()} — JOB CARD
               </Title>
               <Text type="secondary">Multi Brand Two Wheeler Sales & Service</Text>
             </div>
@@ -1923,10 +2149,16 @@ export default function JobCard({ initialValues = null } = {}) {
                 formatReg={formatReg}
                 buildRows={buildRows}
                 defaultGstLabour={DEFAULT_GST_LABOUR}
-                lists={{ BRANCHES, MECHANIC, EXECUTIVES, VEHICLE_TYPES, SERVICE_TYPES }}
+                lists={{
+                  BRANCHES: (allowedBranches || []).map((b) => b.name).filter(Boolean),
+                  MECHANIC: mechanicSelectList,
+                  EXECUTIVES: combinedExecOptions,
+                  VEHICLE_TYPES,
+                  SERVICE_TYPES,
+                }}
                 setServiceTypeLocal={setServiceTypeLocal}
                 setVehicleTypeLocal={setVehicleTypeLocal}
-                setRegDisplay={setRegDisplay}
+                setRegDisplay={setRegDisplayProgrammatic}
                 webhookUrl={JOBCARD_GAS_URL}
                 setFollowUpEnabled={setFollowUpEnabled}
                 setFollowUpAt={setFollowUpAt}
@@ -2038,7 +2270,7 @@ export default function JobCard({ initialValues = null } = {}) {
                         type="primary"
                         size="small"
                         loading={inlineFetchLoading && inlineFetchTarget === "vehicle"}
-                        disabled={inlineFetchLoading || !isRegValid}
+                        disabled={inlineFetchLoading || !isRegComplete}
                         onClick={() => triggerInlineFetch("vehicle")}
                         style={{
                           height: 22,
@@ -2114,56 +2346,57 @@ export default function JobCard({ initialValues = null } = {}) {
             </Row>
 
             <Row gutter={[12, 8]}>
-              <Col xs={24} sm={12} md={8}>
+              <Col xs={24} sm={12} md={6}>
                 <Form.Item
                   label="Company"
                   name="company"
-                  rules={[{ required: true, message: "Please select company" }]}
-                  getValueFromEvent={upperFromEvent}
+                  rules={[{ required: true, message: "Please enter company" }]}
+                  normalize={(v) => toUpperSafe(v)}
                 >
                   <AutoComplete
-                    placeholder="Type company (e.g., H → HONDA / HERO)"
-                    options={companies.map((c) => ({ value: c }))}
-                    filterOption={(inputValue, option) =>
+                    options={companyOptions}
+                    placeholder="e.g., TVS"
+                    filterOption={(input, option) =>
                       String(option?.value || "")
-                        .toLowerCase()
-                        .includes(String(inputValue || "").toLowerCase())
+                        .toUpperCase()
+                        .includes(String(input || "").toUpperCase())
                     }
-                    onChange={(val) => {
-                      const v = toUpperSafe(val);
-                      setSelectedCompany(v);
-                      form.setFieldsValue({ company: v, model: undefined });
-                    }}
-                    style={{ textTransform: "uppercase" }}
-                  />
+                    allowClear
+                  >
+                    <Input style={{ textTransform: "uppercase" }} />
+                  </AutoComplete>
                 </Form.Item>
               </Col>
 
-              <Col xs={24} sm={12} md={8}>
-                <Form.Item label="Model" name="model" rules={[{ required: true }]} getValueFromEvent={upperFromEvent}>
+              <Col xs={24} sm={12} md={6}>
+                <Form.Item
+                  label="Model"
+                  name="model"
+                  rules={[{ required: true }]}
+                  normalize={(v) => toUpperSafe(v)}
+                >
                   <AutoComplete
-                    placeholder="Type model (e.g., ACT → ACTIVA 125)"
-                    options={models.map((m) => ({ value: m }))}
-                    filterOption={(inputValue, option) =>
+                    options={modelOptions}
+                    placeholder="e.g., ACTIVA 6G"
+                    filterOption={(input, option) =>
                       String(option?.value || "")
-                        .toLowerCase()
-                        .includes(String(inputValue || "").toLowerCase())
+                        .toUpperCase()
+                        .includes(String(input || "").toUpperCase())
                     }
-                    onChange={(val) => form.setFieldsValue({ model: toUpperSafe(val) })}
-                    style={{ textTransform: "uppercase" }}
-                  />
+                    allowClear
+                  >
+                    <Input style={{ textTransform: "uppercase" }} />
+                  </AutoComplete>
                 </Form.Item>
               </Col>
 
-              <Col xs={24} sm={12} md={8}>
+              <Col xs={24} sm={12} md={6}>
                 <Form.Item label="Colour" name="colour" getValueFromEvent={upperFromEvent}>
                   <Input style={{ textTransform: "uppercase" }} />
                 </Form.Item>
               </Col>
-            </Row>
 
-            <Row gutter={[12, 8]}>
-              <Col xs={24} sm={12} md={8}>
+              <Col xs={24} sm={12} md={6}>
                 <Form.Item
                   label="Odometer Reading"
                   name="km"
@@ -2224,6 +2457,7 @@ export default function JobCard({ initialValues = null } = {}) {
                   />
                 </Form.Item>
               </Col>
+
               <Col xs={24} md={6}>
                 <Form.Item
                   label="Chassis No"
@@ -2232,19 +2466,19 @@ export default function JobCard({ initialValues = null } = {}) {
                     {
                       validator: (_, val) => {
                         const isFree = String(serviceTypeLocal || "").toLowerCase() === "free";
-                        const v = normalizeChassis(val || "");
                         if (!isFree) return Promise.resolve();
-                        if (v) return Promise.resolve();
-                        return Promise.reject(new Error("Chassis number is required for Free service"));
+                        if (String(val || "").trim()) return Promise.resolve();
+                        return Promise.reject(new Error("Chassis No is required for Free service"));
                       },
                     },
                   ]}
-                  getValueFromEvent={(e) => {
-                    const v = e?.target?.value ?? e;
-                    return normalizeChassis(v);
-                  }}
+                  normalize={(v) => toUpperSafe(v)}
                 >
-                  <Input placeholder="Chassis No (required for Free service)" />
+                  <Input
+                    placeholder="Enter Chassis No"
+                    style={{ textTransform: "uppercase" }}
+                    disabled={isPostLocked}
+                  />
                 </Form.Item>
               </Col>
 
@@ -2331,9 +2565,25 @@ export default function JobCard({ initialValues = null } = {}) {
                             {...rest}
                             name={[name, "desc"]}
                             rules={[{ required: true }]}
-                            getValueFromEvent={upperFromEvent}
+                            normalize={(v) => toUpperSafe(v)}
                           >
-                            <Input placeholder="Labour description" disabled={isPostLocked} style={{ textTransform: 'uppercase' }} />
+                            <AutoComplete
+                              options={labourDescOptions}
+                              defaultActiveFirstOption={false}
+                              filterOption={(input, option) =>
+                                String(option?.value || "")
+                                  .toUpperCase()
+                                  .includes(String(input || "").toUpperCase())
+                              }
+                              onSelect={(val) => applyMatchedLabourRate(name, val)}
+                            >
+                              <Input
+                                placeholder="Labour description"
+                                disabled={isPostLocked}
+                                style={{ textTransform: "uppercase" }}
+                                onBlur={(e) => applyMatchedLabourRate(name, e?.target?.value)}
+                              />
+                            </AutoComplete>
                           </Form.Item>
                         </Col>
                         <Col span={4}>
@@ -2420,10 +2670,15 @@ export default function JobCard({ initialValues = null } = {}) {
 
               <Col xs={24} sm={12} md={8}>
                 <Form.Item label="Allotted Mechanic" name="mechanic" rules={[{ required: true }]}>
-                  <Select
-                    placeholder="Select mechanic"
-                    options={MECHANIC.map((name) => ({ value: name, label: name }))}
-                  />
+                  <AutoComplete
+                    placeholder={mechanicSelectList.length ? "Type or select mechanic" : "Type mechanic name"}
+                    options={mechanicSelectList.map((name) => ({ value: name }))}
+                    filterOption={(inputValue, option) =>
+                      String(option?.value || "").toLowerCase().includes(String(inputValue || "").toLowerCase())
+                    }
+                  >
+                    <Input />
+                  </AutoComplete>
                 </Form.Item>
               </Col>
 
@@ -2434,7 +2689,7 @@ export default function JobCard({ initialValues = null } = {}) {
                       showSearch
                       optionFilterProp="label"
                       placeholder="Select executive"
-                      options={(execOptions.length ? execOptions : EXECUTIVES).map((e) => ({ value: e.name, label: e.name }))}
+                      options={execSelectOptions}
                     />
                   ) : (
                     <Input readOnly placeholder="Auto-fetched from your profile" />
@@ -2641,7 +2896,9 @@ export default function JobCard({ initialValues = null } = {}) {
         labourRows={labourRows}
         totals={totals}
         observationLines={observationLines}
-        executives={EXECUTIVES}
+        executives={combinedExecOptions}
+        executivePhone={resolveExecutivePhone(vals?.executive)}
+        locationQrUrl={ownerLocationQrUrl}
       />
 
       <PostServiceSheet

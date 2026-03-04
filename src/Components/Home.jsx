@@ -1,18 +1,12 @@
 import React from "react";
 import { Link } from "react-router-dom";
+import { getOwnerOrgName } from "../utils/ownerConfig";
 import { FaWhatsapp } from "react-icons/fa";
 
-import { findShowroomById, PRIMARY_SHOWROOM } from "../data/showrooms";
-import {
-  SALES_DISPLAY,
-  SALES_TEL_LINK,
-  SALES_WHATSAPP_LINK,
-  BUSINESS_HOURS,
-  CONTACT_EMAIL,
-} from "../data/contactInfo";
+import { BUSINESS_HOURS, CONTACT_EMAIL } from "../data/contactInfo";
 
 /**
- * Shantha Motors - Heroic Home
+ * Motera - Heroic Home
  * Built with plain React + CSS-in-JS styles for quick drop-in.
  * Sections:
  *  - Neon glass hero with marquee
@@ -26,6 +20,7 @@ import {
  *  - WhatsApp floating action button
  */
 export default function Home() {
+  const orgName = getOwnerOrgName() || "Motera";
   const useScreen = () => {
     const [width, setWidth] = React.useState(
       typeof window !== "undefined" ? window.innerWidth : 1280
@@ -43,25 +38,6 @@ export default function Home() {
 
   const { isMobile, isTablet } = useScreen();
 
-  const muddinapalya = findShowroomById("muddinapalya") || PRIMARY_SHOWROOM;
-
-  const toEmbed = (url) => {
-    if (!url) return null;
-    try {
-      const parsed = new URL(url);
-      if (!parsed.searchParams.has("output")) {
-        parsed.searchParams.set("output", "embed");
-      }
-      return parsed.toString();
-    } catch (err) {
-      console.error("Failed to format map URL", err);
-      return null;
-    }
-  };
-
-  const mapEmbedUrl = toEmbed(muddinapalya?.mapUrl) ||
-    "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3888.251083025643!2d77.54763557508214!3d12.956528587360554!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3bae3da9b0d76597%3A0x4788d4bcee66216b!2sRajajinagar%2C%20Bengaluru!5e0!3m2!1sen!2sin!4v1700000000000";
-
   const reviewCols = isMobile ? 1 : isTablet ? 2 : 3;
   const containerPad = isMobile ? 14 : 22;
   const heroHeight = isMobile ? 520 : isTablet ? 620 : 720;
@@ -72,7 +48,6 @@ export default function Home() {
   const highlightCols = isMobile ? "1fr" : isTablet ? "repeat(2, 1fr)" : "repeat(4, 1fr)";
   const modelCols = isMobile ? "1fr" : isTablet ? "repeat(2, 1fr)" : "repeat(3, 1fr)";
   const journeyCols = isMobile ? "1fr" : "repeat(4, minmax(0, 1fr))";
-  const mapHeight = isMobile ? 240 : isTablet ? 300 : 340;
 
   const styles = {
     root: { background: "#060913", color: "#e5e7eb" },
@@ -402,18 +377,10 @@ export default function Home() {
     journeyText: { color: "#cbd5e1", fontSize: 13, lineHeight: 1.6 },
     visitGrid: {
       display: "grid",
-      gridTemplateColumns: isMobile ? "1fr" : isTablet ? "1.1fr 0.9fr" : "1.1fr 0.9fr",
+      gridTemplateColumns: "1fr",
       gap: 18,
       alignItems: "stretch",
       marginTop: 18,
-    },
-    mapFrame: {
-      width: "100%",
-      border: "none",
-      borderRadius: 18,
-      height: mapHeight,
-      boxShadow: "0 22px 50px rgba(0,0,0,0.35)",
-      filter: "saturate(1.2) contrast(1.05)",
     },
     visitCard: {
       borderRadius: 18,
@@ -439,16 +406,6 @@ export default function Home() {
       display: "grid",
       placeItems: "center",
       fontSize: 18,
-    },
-    qrImage: {
-      width: 120,
-      height: 120,
-      objectFit: "contain",
-      borderRadius: 12,
-      alignSelf: "center",
-      background: "rgba(15,23,42,0.6)",
-      border: "1px solid rgba(148,163,184,0.25)",
-      padding: 10,
     },
     marquee: {
       display: "flex",
@@ -570,7 +527,7 @@ export default function Home() {
     },
     {
       stage: "Experience",
-      copy: "Instant test rides scheduled from your nearest Shantha Motors experience center.",
+      copy: `Instant test rides scheduled from your nearest ${orgName} experience center.`,
     },
     {
       stage: "Purchase",
@@ -580,13 +537,6 @@ export default function Home() {
       stage: "Care",
       copy: "Scheduled service reminders, free health checks and priority support for loyal riders.",
     },
-  ];
-
-  const visitRows = [
-    { icon: "📍", text: muddinapalya?.address || "Muddinapalya, Bengaluru" },
-    { icon: "⏰", text: BUSINESS_HOURS },
-    { icon: "📞", text: `Sales: ${SALES_DISPLAY}` },
-    { icon: "✉️", text: CONTACT_EMAIL },
   ];
 
   const reviewList = [
@@ -613,7 +563,7 @@ export default function Home() {
       {!isMobile && (
         <div style={styles.navWrap}>
           <div style={{ ...styles.container, ...styles.nav }}>
-            <div style={styles.logo}>SHANTHA MOTORS</div>
+            <div style={styles.logo}>MOTERA</div>
             <button type="button" style={styles.burger} onClick={() => document.getElementById("offerings")?.scrollIntoView({ behavior: "smooth" })}>
               <div style={{ display: "grid", gap: 4 }}>
                 <span style={{ height: 2, width: 20, background: "#131417", display: "block" }} />
@@ -651,7 +601,7 @@ export default function Home() {
                   style={styles.ctaGhost}
                   onClick={() => document.getElementById("products")?.scrollIntoView({ behavior: "smooth" })}
                 >Browse Products</button>
-                <span style={{ color: "#93a4c3", fontSize: 12 }}>No spam - Instant WhatsApp assistance</span>
+                <span style={{ color: "#93a4c3", fontSize: 12 }}>No spam - Instant assistance</span>
               </div>
             </div>
 
@@ -662,7 +612,7 @@ export default function Home() {
                   <span style={{ fontSize: 12, color: "#93a4c3" }}>Live</span>
                 </div>
                 <div style={styles.stats}>
-                  {[{ k: "Showrooms", v: "10+" }, { k: "Happy Riders", v: "25k+" }, { k: "Avg. Rating", v: "4.7★" }, { k: "Genuine Parts", v: "100%" }].map((stat) => (
+                  {[{ k: "Happy Riders", v: "25k+" }, { k: "Avg. Rating", v: "4.7★" }, { k: "Genuine Parts", v: "100%" }].map((stat) => (
                     <div key={stat.k} style={styles.statCard}>
                       <div style={{ fontSize: 18, fontWeight: 900 }}>{stat.v}</div>
                       <div style={{ fontSize: 12, color: "#9fb0cf" }}>{stat.k}</div>
@@ -690,7 +640,7 @@ export default function Home() {
 
       <div style={styles.container}>
         <section style={styles.section}>
-          <h2 style={styles.sectionTitle}>Why Riders Choose Shantha Motors</h2>
+          <h2 style={styles.sectionTitle}>Why Riders Choose {orgName}</h2>
           <p style={styles.sectionSub}>A premium dealership journey built on trust, transparency and tech-enabled service.</p>
 
           <div style={styles.highlightGrid}>
@@ -717,7 +667,7 @@ export default function Home() {
                 Speak with an advisor now - curated vehicle options, EMI plans and service packages shared in minutes.
               </p>
             </div>
-            <a href={SALES_TEL_LINK || "tel:+919731366921"} style={styles.ribbonCta}>Call Sales Desk</a>
+            <Link to="/contact" style={styles.ribbonCta}>Contact {orgName}</Link>
           </div>
         </section>
       </div>
@@ -779,7 +729,7 @@ export default function Home() {
 
       <div style={styles.container}>
         <section style={styles.section}>
-          <h2 style={styles.sectionTitle}>Your Shantha Motors Journey</h2>
+          <h2 style={styles.sectionTitle}>Your {orgName} Journey</h2>
           <p style={styles.sectionSub}>We stay with you at every milestone - from first test ride to scheduled service.</p>
 
           <div style={styles.journeyGrid}>
@@ -800,26 +750,19 @@ export default function Home() {
       <div style={styles.container}>
         <section style={styles.section} id="enquiry">
           <h2 style={styles.sectionTitle}>Visit & Connect</h2>
-          <p style={styles.sectionSub}>Drop by our flagship outlet or book a callback. We respond within 15 minutes.</p>
+          <p style={styles.sectionSub}>Book a callback or reach the {orgName} team directly.</p>
 
           <div style={styles.visitGrid}>
-            <iframe
-              style={styles.mapFrame}
-              title="Shantha Motors Map"
-              loading="lazy"
-              src={mapEmbedUrl}
-              allowFullScreen
-              referrerPolicy="no-referrer-when-downgrade"
-            />
-
             <aside style={styles.visitCard}>
               <div style={{ display: "grid", gap: 12 }}>
-                {visitRows.map((row) => (
-                  <div key={row.text} style={styles.visitRow}>
-                    <span style={styles.visitIcon}>{row.icon}</span>
-                    <span>{row.text}</span>
-                  </div>
-                ))}
+                <div style={styles.visitRow}>
+                  <span style={styles.visitIcon}>✉️</span>
+                  <span>{CONTACT_EMAIL || "contact@motera.com"}</span>
+                </div>
+                <div style={styles.visitRow}>
+                  <span style={styles.visitIcon}>🕒</span>
+                  <span>{BUSINESS_HOURS}</span>
+                </div>
               </div>
 
               <div style={{ borderTop: "1px solid rgba(148,163,184,0.22)", paddingTop: 14, display: "grid", gap: 10 }}>
@@ -828,8 +771,6 @@ export default function Home() {
                 <Link to="/jobcard" style={{ color: "#93c5fd", textDecoration: "none", fontWeight: 800 }}>Create Job Card  &rarr;</Link>
                 <Link to="/quotation" style={{ color: "#93c5fd", textDecoration: "none", fontWeight: 800 }}>Request Quotation  &rarr;</Link>
               </div>
-
-              <img src="/location-qr.png" alt="Location QR" style={styles.qrImage} />
             </aside>
           </div>
         </section>
@@ -841,9 +782,9 @@ export default function Home() {
           id="about"
         >
           <div>
-            <h2 style={styles.sectionTitle}>About Shantha Motors</h2>
+            <h2 style={styles.sectionTitle}>About {orgName}</h2>
             <p style={styles.sectionSub}>
-              Shantha Motors began in 2022 with one compact outlet and a promise to make premium two-wheelers and transparent servicing accessible to every rider in Bengaluru.
+              {orgName} began in 2022 with one compact outlet and a promise to make premium two-wheelers and transparent servicing accessible to every rider in Bengaluru.
               In just a few years we have grown into a multi-brand network that blends curated bikes, quick finance approvals and certified workshops equipped for EV diagnostics.
               Our rider-first crew keeps the journey personal with doorstep pick-ups, real-time updates and a culture that treats every delivery like day one.
             </p>
@@ -928,20 +869,18 @@ export default function Home() {
 
       <div style={styles.container}>
         <footer style={styles.footer}>
-          <div>© {new Date().getFullYear()} Shantha Motors. All rights reserved.</div>
+          <div>© {new Date().getFullYear()} {orgName}. All rights reserved.</div>
         </footer>
       </div>
 
-      <a
+      <Link
         style={styles.whatsapp}
-        href={SALES_WHATSAPP_LINK || "https://wa.me/919731366921"}
-        target="_blank"
-        rel="noreferrer"
-        aria-label="Chat on WhatsApp"
-        title="Chat on WhatsApp"
+        to="/contact"
+        aria-label={`Contact ${orgName}`}
+        title={`Contact ${orgName}`}
       >
         <FaWhatsapp size={28} />
-      </a>
+      </Link>
     </div>
   );
 }

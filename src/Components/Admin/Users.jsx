@@ -1,8 +1,8 @@
 import React from "react";
 import dayjs from "dayjs";
-import { Table, Button, Space, Modal, Form, Input, Select, message, Tag, Checkbox, Row, Col, Grid } from "antd";
+import { Table, Button, Space, Modal, Form, Input, Select, message, Tag, Checkbox, Row, Col, Grid, InputNumber } from "antd";
 import { listUsers, listUsersPublic, updateUser, deleteUser } from "../../apiCalls/adminUsers";
-import { listBranchesPublic } from "../../apiCalls/branches";
+import { listBranches } from "../../apiCalls/branches";
 import { exportToCsv } from "../../utils/csvExport";
 
 const ROLE_OPTIONS = [
@@ -10,6 +10,7 @@ const ROLE_OPTIONS = [
   { label: "Owner", value: "owner" },
   { label: "Staff", value: "staff" },
   { label: "Mechanic", value: "mechanic" },
+  { label: "Call Boy", value: "callboy" },
   { label: "Employees", value: "employees" },
   { label: "User", value: "user" },
   { label: "Backend", value: "backend" },
@@ -31,7 +32,9 @@ export default function Users({ readOnly = false }) {
   const [modalOpen, setModalOpen] = React.useState(false);
   const [editing, setEditing] = React.useState(null);
   const [branches, setBranches] = React.useState([]);
+  const [owners, setOwners] = React.useState([]);
   const [form] = Form.useForm();
+  const roleValue = Form.useWatch("role", form);
   const getRowId = React.useCallback((row) => row?.id || row?._id || row?.userId || null, []);
 
   // Quick filters
@@ -45,8 +48,13 @@ export default function Users({ readOnly = false }) {
   const [pageSize, setPageSize] = React.useState(25);
 
   const fetchBranches = React.useCallback(async () => {
-    const res = await listBranchesPublic({ limit: 500, status: 'active' });
+    const res = await listBranches({ limit: 500, status: 'active' });
     if (res?.success) setBranches(res.data.items || []);
+  }, []);
+
+  const fetchOwners = React.useCallback(async () => {
+    const res = await listUsers({ role: 'owner', limit: 500, page: 1 });
+    if (res?.success) setOwners(res.data.items || []);
   }, []);
 
   const fetchList = React.useCallback(async () => {
@@ -110,6 +118,7 @@ export default function Users({ readOnly = false }) {
   }, [q, roleFilter, statusFilter, branchFilter, readOnly]);
 
   React.useEffect(() => { fetchBranches(); }, [fetchBranches]);
+  React.useEffect(() => { fetchOwners(); }, [fetchOwners]);
   React.useEffect(() => { fetchList(); }, [fetchList]);
   React.useEffect(() => { setPage(1); }, [q, roleFilter, statusFilter, branchFilter]);
 
@@ -134,6 +143,8 @@ export default function Users({ readOnly = false }) {
         ? row.branches.map((b) => (typeof b === 'string' ? b : (b?._id || b?.id))).filter(Boolean)
         : undefined,
       canSwitchBranch: !!row.canSwitchBranch,
+      ownerBranchLimit: row.ownerLimits?.branchLimit ?? undefined,
+      owner: row.owner?._id || row.owner || undefined,
     });
     setModalOpen(true);
   };
@@ -178,7 +189,9 @@ export default function Users({ readOnly = false }) {
         ...(vals.employeeCode ? { employeeCode: vals.employeeCode } : {}),
         ...(vals.primaryBranch ? { primaryBranch: vals.primaryBranch } : {}),
         ...(Array.isArray(vals.branches) ? { branches: vals.branches } : {}),
+        ...(vals.owner ? { owner: vals.owner } : {}),
         canSwitchBranch: !!vals.canSwitchBranch,
+        ...(vals.ownerBranchLimit != null ? { ownerLimits: { branchLimit: vals.ownerBranchLimit } } : {}),
       };
       setSaving(true);
       const editingId = getRowId(editing);
@@ -216,6 +229,7 @@ export default function Users({ readOnly = false }) {
     { title: "Phone", dataIndex: "phone", key: "phone", width: 110, ellipsis: true },
     { title: "Role", dataIndex: "role", key: "role", width: 100, render: (v) => <Tag color={v === 'admin' ? 'red' : v === 'owner' ? 'gold' : v === 'backend' ? 'purple' : v === 'mechanic' ? 'cyan' : v === 'staff' ? 'blue' : 'default'}>{v}</Tag> },
     { title: "Primary Branch", key: "primaryBranch", width: 140, ellipsis: true, render: (_, r) => r.primaryBranch?.name || "—" },
+    { title: "Branch Limit", key: "branchLimit", width: 120, render: (_, r) => r?.ownerLimits?.branchLimit ?? "—" },
     { title: "Status", dataIndex: "status", key: "status", width: 90, render: (v) => (
       v === "active" ? <Tag color="green">Active</Tag> : v === "inactive" ? <Tag>Inactive</Tag> : <Tag color="orange">Suspended</Tag>
     ) },
@@ -369,10 +383,22 @@ export default function Users({ readOnly = false }) {
                 <Select options={ROLE_OPTIONS} />
               </Form.Item>
             </Col>
+            {["staff", "mechanic", "employees", "callboy"].includes(String(roleValue || "").toLowerCase()) ? (
+              <Col xs={24} sm={12}>
+                <Form.Item name="owner" label="Owner" rules={[{ required: true, message: "Owner is required" }]}>
+                  <Select options={owners.map(o => ({ label: `${o.name} (${o.email})`, value: o._id }))} placeholder="Select owner" />
+                </Form.Item>
+              </Col>
+            ) : null}
 
             <Col xs={24} sm={12}>
               <Form.Item name="status" label="Status" initialValue="active" rules={[{ required: true }]}>
                 <Select options={STATUS_OPTIONS} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item name="ownerBranchLimit" label="Owner Branch Limit">
+                <InputNumber min={0} style={{ width: "100%" }} placeholder="Set branch limit" />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>

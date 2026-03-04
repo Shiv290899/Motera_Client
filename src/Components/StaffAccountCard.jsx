@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Card, Space, Typography, message, Button, Divider, Tag, Tooltip, Progress, Modal, Table, Grid, Spin, Empty } from 'antd';
 import { saveBookingViaWebhook, saveJobcardViaWebhook } from '../apiCalls/forms';
+import { resolveUnifiedGasUrl } from '../utils/ownerConfig';
 import { useNavigate } from 'react-router-dom';
 
 const { Text } = Typography;
@@ -9,11 +10,11 @@ export default function StaffAccountCard() {
   const navigate = useNavigate();
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
-  const DEFAULT_JC_URL = 'https://script.google.com/macros/s/AKfycbw7DzKCy3wZeeRBEM5XKIu6w0gt_2ouCaSkpaKv0UkjkQThCtVoRciOkkYT8sNViQuEaw/exec';
-  const GAS_URL = import.meta.env.VITE_JOBCARD_GAS_URL || DEFAULT_JC_URL;
+  const DEFAULT_JC_URL = 'https://script.google.com/macros/s/AKfycbz_DoNoD0XTx3RNMOSZfypbMqWVN4yTy3ct96aE4LhJ9yb_YvKr0GRbO_GA3Fgkwptb/exec?module=jobcard';
+  const GAS_URL = resolveUnifiedGasUrl('jobcard', import.meta.env.VITE_JOBCARD_GAS_URL || DEFAULT_JC_URL);
   const SECRET = import.meta.env.VITE_JOBCARD_GAS_SECRET || '';
-  const DEFAULT_BOOKING_URL = 'https://script.google.com/macros/s/AKfycbwSn5hp1cSWlJMGhe2cYUtid2Ruqh9H13mZbq0PwBpYB0lMLufZbIjZ5zioqtKgE_0sNA/exec';
-  const BOOKING_GAS_URL = import.meta.env.VITE_BOOKING_GAS_URL || DEFAULT_BOOKING_URL;
+  const DEFAULT_BOOKING_URL = 'https://script.google.com/macros/s/AKfycbz_DoNoD0XTx3RNMOSZfypbMqWVN4yTy3ct96aE4LhJ9yb_YvKr0GRbO_GA3Fgkwptb/exec?module=booking';
+  const BOOKING_GAS_URL = resolveUnifiedGasUrl('booking', import.meta.env.VITE_BOOKING_GAS_URL || DEFAULT_BOOKING_URL);
   const BOOKING_SECRET = import.meta.env.VITE_BOOKING_GAS_SECRET || '';
 
   const [data, setData] = useState({ bookingAmountPending:0, jcAmountPending:0, minorSalesAmountPending:0, totalPending:0, prevDueAssigned:0 });
@@ -335,6 +336,28 @@ export default function StaffAccountCard() {
       .reduce((sum, r) => sum + (Number(r.balanceValue || 0) || 0), 0);
     return { service, sales, salesBalance };
   }, [pendingServiceRows, pendingSalesRows]);
+  const serviceScrollThreshold = isMobile ? 4 : 6;
+  const salesScrollThreshold = isMobile ? 4 : 6;
+  const serviceScrollable = pendingServiceRows.length > serviceScrollThreshold;
+  const salesScrollable = pendingSalesRows.length > salesScrollThreshold;
+  const serviceListStyle = {
+    marginTop: 8,
+    display:'grid',
+    gap: 8,
+    maxHeight: serviceScrollable ? (isMobile ? 300 : 380) : 'none',
+    overflowY: serviceScrollable ? 'auto' : 'visible',
+    paddingRight: serviceScrollable ? 4 : 0,
+    WebkitOverflowScrolling: 'touch',
+  };
+  const salesListStyle = {
+    marginTop: 8,
+    display:'grid',
+    gap: 8,
+    maxHeight: salesScrollable ? (isMobile ? 300 : 380) : 'none',
+    overflowY: salesScrollable ? 'auto' : 'visible',
+    paddingRight: salesScrollable ? 4 : 0,
+    WebkitOverflowScrolling: 'touch',
+  };
 
   return (
     <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 16, alignItems: 'start' }}>
@@ -478,11 +501,11 @@ export default function StaffAccountCard() {
           <div>
             <Text strong>Service</Text>
             <Text type='secondary' style={{ fontSize: 12, marginLeft: 6 }}>Pending Job Cards</Text>
-            <div style={{ marginTop: 8, display:'grid', gap: 8 }}>
+            <div style={serviceListStyle}>
               {pendingLoading ? (
                 <div style={{ padding: 8 }}><Spin size='small' /></div>
               ) : pendingServiceRows.length ? (
-                pendingServiceRows.slice(0, 8).map((r) => (
+                pendingServiceRows.map((r) => (
                   <div
                     key={r.key}
                     style={{
@@ -536,11 +559,11 @@ export default function StaffAccountCard() {
           <div>
             <Text strong>Sales</Text>
             <Text type='secondary' style={{ fontSize: 12, marginLeft: 6 }}>Pending Balance (Bookings)</Text>
-            <div style={{ marginTop: 8, display:'grid', gap: 8 }}>
+            <div style={salesListStyle}>
               {pendingLoading ? (
                 <div style={{ padding: 8 }}><Spin size='small' /></div>
               ) : pendingSalesRows.length ? (
-                pendingSalesRows.slice(0, 8).map((r) => (
+                pendingSalesRows.map((r) => (
                   <div
                     key={r.key}
                     style={{

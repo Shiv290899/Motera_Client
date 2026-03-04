@@ -22,7 +22,7 @@ import {
   Spin,
 } from "antd";
 import { InboxOutlined, CreditCardOutlined, PrinterOutlined } from "@ant-design/icons";
-import { listCurrentStocksPublic } from "../apiCalls/stocks";
+import { createStock, listCurrentStocksPublic } from "../apiCalls/stocks";
 import { saveBookingViaWebhook } from "../apiCalls/forms";
 import { listBranchesPublic } from "../apiCalls/branches";
 import { listUsersPublic } from "../apiCalls/adminUsers";
@@ -32,6 +32,7 @@ import BookingHistoryButton from "./BookingHistoryButton";
 import { handleSmartPrint } from "../utils/printUtils";
 import { normalizeKey, uniqCaseInsensitive } from "../utils/caseInsensitive";
 import dayjs from "dayjs";
+import { resolveUnifiedGasUrl } from "../utils/ownerConfig";
 import { useLocation } from "react-router-dom";
 import { consumeFollowUpBookingPrefill } from "../utils/followUpPrefill";
 import { buildBookingFormPatch } from "../utils/bookingFormPrefill";
@@ -85,7 +86,8 @@ const derivePaymentPart = (src, idx) => {
   if (!cash && !online && legacyAmount) {
     if (legacyMode === "online") {
       online = legacyAmount;
-    } else {
+    }
+    else {
       cash = legacyAmount;
     }
   }
@@ -122,9 +124,10 @@ const SHEET_CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vQYGuNPY_2ivfS7MTX4bWiu1DWdF2mrHSCnmTznZVEHxNmsrgcGWjVZN4UDUTOzQQdXTnbeM-ylCJbB/pub?gid=408799621&single=true&output=csv";
 
 // Google Apps Script Web App endpoint to save bookings to Google Sheet
-const BOOKING_GAS_URL =
-  import.meta.env.VITE_BOOKING_GAS_URL ||
-  "https://script.google.com/macros/s/AKfycbwSn5hp1cSWlJMGhe2cYUtid2Ruqh9H13mZbq0PwBpYB0lMLufZbIjZ5zioqtKgE_0sNA/exec";
+const DEFAULT_BOOKING_GAS_URL =
+  "https://script.google.com/macros/s/AKfycbwd-hKTwEfAretqEn7c_jIqNgheFgDaSVjCO3wHHQxgXQbbd8grLr8tUaRyLoAJWe4O/exec?module=booking";
+const getBookingGasUrl = () =>
+  resolveUnifiedGasUrl('booking', import.meta.env.VITE_BOOKING_GAS_URL || DEFAULT_BOOKING_GAS_URL);
 
 const BOOKING_GAS_SECRET = import.meta.env.VITE_BOOKING_GAS_SECRET || "";
 
@@ -215,6 +218,7 @@ export default function BookingForm({
   asModal = false,
   initialValues = null,
   onSuccess,
+  autoUpdateStockOnSave = true,
   startPaymentsOnly = false,
   editRefDefault = null,
   allowBranchSelect = false,
@@ -224,6 +228,7 @@ export default function BookingForm({
   branchOptionsLoading = false,
   executiveOptionsLoading = false,
 } = {}) {
+  const BOOKING_GAS_URL = getBookingGasUrl();
   const printRef = useRef(null);
   const screens = useBreakpoint();
   const isMobile = !screens.md;
@@ -864,7 +869,7 @@ export default function BookingForm({
       return;
     }
     try {
-      const { patch, metadata } = buildBookingFormPatch(followUpData.payload);
+      const { patch, metadata } = buildBookingFormPatch(followUpData);
       form.setFieldsValue(patch);
       if (patch.company) setSelectedCompany?.(patch.company);
       if (patch.bikeModel) setSelectedModel?.(patch.bikeModel);
@@ -1242,6 +1247,16 @@ export default function BookingForm({
           values.purchaseType === "nohp"
             ? values.disbursementAmount ?? undefined
             : undefined,
+        emiAmount:
+          values.purchaseType === "loan" ||
+          values.purchaseType === "nohp"
+            ? Number(values.emiAmount) || undefined
+            : undefined,
+        tenure:
+          values.purchaseType === "loan" ||
+          values.purchaseType === "nohp"
+            ? Number(values.tenure) || undefined
+            : undefined,
         // DP breakdown
         dp: {
           downPayment: values.downPayment ?? undefined,
@@ -1316,6 +1331,16 @@ export default function BookingForm({
           values.purchaseType === "nohp"
             ? values.disbursementAmount ?? undefined
             : undefined,
+        emiAmount:
+          values.purchaseType === "loan" ||
+          values.purchaseType === "nohp"
+            ? Number(values.emiAmount) || undefined
+            : undefined,
+        tenure:
+          values.purchaseType === "loan" ||
+          values.purchaseType === "nohp"
+            ? Number(values.tenure) || undefined
+            : undefined,
         financier: values.financier || values.nohpFinancier || undefined,
         addressProofMode: values.addressProofMode,
         addressProofTypes: values.addressProofTypes || [],
@@ -1385,6 +1410,46 @@ export default function BookingForm({
         throw new Error(
           String((resp?.data || resp)?.message || "Submission failed")
         );
+      }
+
+      // For regular new bookings with a selected chassis, mark stock as invoiced/out of stock.
+      const selectedChassis = String(values?.chassisNo || "").trim().toUpperCase();
+      const isRealChassis = selectedChassis && selectedChassis !== "__ALLOT__";
+      const isEditSave = Boolean(paymentsOnlyMode || editRef?.bookingId || editRef?.mobile);
+      if (autoUpdateStockOnSave && isRealChassis && !isEditSave) {
+        try {
+          const stockRow = {
+            Chassis_No: selectedChassis,
+            Company: values?.company || "",
+            Model: values?.bikeModel || "",
+            Variant: values?.variant || "",
+            Color: values?.color || "",
+            Action: "invoice",
+            Customer_Name: values?.customerName || "",
+            Source_Branch:
+              chassisInfo?.branch ||
+              values?.branch ||
+              branchDefault ||
+              "",
+            Notes: (resp?.data || resp)?.bookingId
+              ? `Book via Booking ID ${(resp?.data || resp).bookingId}`
+              : "Book via Booking form",
+          };
+          const stockResp = await createStock({
+            data: stockRow,
+            createdBy: currentUser?.name || currentUser?.email || "user",
+          });
+          if (!(stockResp?.success ?? stockResp?.ok)) {
+            message.warning(
+              stockResp?.message ||
+                "Booking saved, but stock could not be marked out of stock."
+            );
+          }
+        } catch {
+          message.warning(
+            "Booking saved, but stock could not be marked out of stock."
+          );
+        }
       }
 
       if (!silent) message.success("Booking saved successfully");
@@ -1728,21 +1793,6 @@ export default function BookingForm({
                   setOnRoadPriceOverride(next);
                 }}
               />
-              <Button
-                size={ctlSize}
-                onClick={() => {
-                  if (!onRoadPriceEditing) {
-                    setOnRoadPriceOverride((cur) =>
-                      cur == null ? Number(selectedOnRoadPrice || 0) || 0 : cur
-                    );
-                    setOnRoadPriceEditing(true);
-                    return;
-                  }
-                  setOnRoadPriceEditing(false);
-                }}
-              >
-                {onRoadPriceEditing ? "Lock" : "Edit"}
-              </Button>
             </div>
           </Form.Item>
         </Col>
@@ -2029,6 +2079,37 @@ export default function BookingForm({
           </Form.Item>
         </Col>
       </Row>
+
+      {(purchaseType === "loan" || purchaseType === "nohp") && (
+        <Row gutter={[16, 0]}>
+          <Col xs={24} md={12}>
+            <Form.Item label="EMI Amount (₹)" name="emiAmount">
+              <InputNumber
+                size={ctlSize}
+                style={{ width: "100%" }}
+                min={0}
+                step={500}
+                prefix={<CreditCardOutlined />}
+                placeholder="Enter EMI amount"
+                disabled={paymentsOnlyMode}
+              />
+            </Form.Item>
+          </Col>
+          <Col xs={24} md={12}>
+            <Form.Item label="Tenure (Months)" name="tenure">
+              <InputNumber
+                size={ctlSize}
+                style={{ width: "100%" }}
+                min={1}
+                step={1}
+                precision={0}
+                placeholder="Enter tenure in months"
+                disabled={paymentsOnlyMode}
+              />
+            </Form.Item>
+          </Col>
+        </Row>
+      )}
 
       {/* Address */}
       <Row gutter={[16, 0]}>

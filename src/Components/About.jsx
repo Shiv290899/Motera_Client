@@ -1,5 +1,6 @@
 // src/Pages/About.jsx
 import React from "react"; // React core
+import { getOwnerOrgName } from "../utils/ownerConfig";
 // ↓ Ant Design UI imports
 import {
   Typography,        // Titles, Paragraph, Text
@@ -34,6 +35,7 @@ const { Title, Paragraph, Text } = Typography; // Shorthands for typography
 const { useBreakpoint } = Grid;                // Hook to detect breakpoints
 
 export default function About() { // Default export of the About page
+  const orgName = getOwnerOrgName() || "Motera";
   // ---------- RESPONSIVE BREAKPOINTS ----------
   const bp = useBreakpoint();                    // { xs, sm, md, lg, xl, xxl } booleans
   // Decide device buckets
@@ -44,25 +46,25 @@ export default function About() { // Default export of the About page
   const facts = [                                // Quick facts for Descriptions
     { label: "Founded", value: "Aug 2022" },     // Founded month/year
     { label: "Headquarters", value: "Bengaluru" },// HQ city
-    { label: "Current Showrooms", value: "10" }, // Current count
-    { label: "2025 Target", value: "15" },       // Near-term target
-    { label: "Vision", value: "100+ (aiming 200+)" }, // Long-term vision
+    { label: "Focus", value: "Sales & Service" },
+    { label: "Promise", value: "Transparent ownership" },
+    { label: "Vision", value: "Rider-first experience" },
   ];
 
   const timeline = [                             // Growth timeline items
-    { year: "2022", title: "Year 1", desc: "Launched our first showroom in Bengaluru. Premium, transparent buying experience and dependable after-sales.", stat: 1 },   // Y1
-    { year: "2023", title: "Year 2", desc: "Expanded to more neighborhoods for easy access to sales, service, and genuine spares.", stat: 3 },                        // Y2
-    { year: "2024", title: "Year 3", desc: "Scaled rapidly while cloning our service DNA—bright spaces, trained teams, and customer-first process.", stat: 9 },      // Y3
-    { year: "2025", title: "Year 4", desc: "Operational excellence across the city. Targeting city-wide coverage by year-end.", stat: "10 → 27" },                   // Y4
-    { year: "Next", title: "Momentum", desc: "Extending the ~3× trajectory—next milestone: 27 showrooms—on the path to 100+.", stat: "27 • 100+" },                  // Next
+    { year: "2022", title: "Year 1", desc: "Launched in Bengaluru with a promise of transparent buying and dependable after‑sales.", stat: "Launch" },
+    { year: "2023", title: "Year 2", desc: "Expanded service capacity and streamlined delivery with customer-first processes.", stat: "Scale" },
+    { year: "2024", title: "Year 3", desc: "Strengthened teams and standardized service quality end‑to‑end.", stat: "Quality" },
+    { year: "2025", title: "Year 4", desc: "Operational excellence and faster turnaround for riders across the city.", stat: "Speed" },
+    { year: "Next", title: "Momentum", desc: "Investing in better experiences, smarter tools, and consistent care.", stat: "Future" },
   ];
 
   const whyUs = [                                // Why choose us cards
-    { icon: <TrophyOutlined />, title: "Proven Track Record", desc: "From 1 to 10 showrooms in three years—growth powered by customer trust." }, // Card 1
+    { icon: <TrophyOutlined />, title: "Proven Track Record", desc: "Steady growth powered by customer trust and repeat riders." }, // Card 1
     { icon: <SmileOutlined />, title: "Customer-First", desc: "Every decision—from inventory to processes—centers your needs." },               // Card 2
     { icon: <ToolOutlined />, title: "Skilled Teams", desc: "Friendly advisors & trained technicians using only genuine parts." },              // Card 3
-    { icon: <EnvironmentOutlined />, title: "Close to You", desc: "Strategic locations for quick access to sales & service." },                // Card 4
-    { icon: <CheckCircleOutlined />, title: "Consistent Quality", desc: "Every branch upholds the same high Shantha Motors standard." },       // Card 5
+    { icon: <EnvironmentOutlined />, title: "Close to You", desc: "Easy access to sales & service when you need it." },                // Card 4
+    { icon: <CheckCircleOutlined />, title: "Consistent Quality", desc: `Every team upholds the same high ${orgName} standard.` },       // Card 5
   ];
 
   const values = [
@@ -143,13 +145,12 @@ export default function About() { // Default export of the About page
             level={1}                              // H1
             style={{ color: "#fff", marginTop: 8, marginBottom: 10, fontSize: heroTitleSize }} // Responsive font
           >
-            About Shantha Motors                    {/* Page title */}
+            About {orgName}                    {/* Page title */}
           </Title>
           <Paragraph
             style={{ color: "#fff", opacity: 0.95, maxWidth: 860, fontSize: heroSubSize }} // Responsive subtitle
           >
-            Founded by <Text strong style={{ color: "white" }}>Nagesh</Text>, an <Text strong style={{ color: "white" }}>NITK Civil Engineer</Text>,
-            Shantha Motors began with a single showroom and a bold mission: redefine the
+            {orgName} began with a bold mission: redefine the
             two-wheeler buying and ownership experience through trust, transparency, and joyful service.
           </Paragraph>
           <Tag color="magenta" style={{ fontWeight: 700 }}> {/* Badge line */}
@@ -168,7 +169,7 @@ export default function About() { // Default export of the About page
                   Our Story                         {/* Section title */}
                 </Title>
                 <Paragraph>
-                  In August 2022, Shantha Motors opened its doors in Bengaluru. From day one, we
+                  In August 2022, {orgName} opened its doors in Bengaluru. From day one, we
                   focused on more than vehicles—we built an experience. Our founder rolled up his
                   sleeves to set up operations from scratch: sourcing, layout, hiring, training,
                   and crafting processes rooted in <Text strong>trust</Text>,{" "}
@@ -176,27 +177,25 @@ export default function About() { // Default export of the About page
                   rider became an ambassador, and our reputation accelerated.
                 </Paragraph>
                 <Paragraph>
-                  Today, we proudly operate <Text strong>10 showrooms</Text> across the city, and by the
-                  end of <Text strong>2025</Text> we’re on track for <Text strong>15</Text>. Our long-term
-                  vision is expansive: a resilient network of <Text strong>100+</Text> (and possibly{" "}
-                  <Text strong>200+</Text>) showrooms across Karnataka and beyond—bringing Shantha
-                  Motors quality within easy reach of every rider.
+                  Today, {orgName} continues to grow its capabilities with a focus on speed, quality,
+                  and transparent service. Our long‑term vision is simple: make premium two‑wheeler
+                  ownership effortless for every rider.
                 </Paragraph>
 
                 <Divider style={{ margin: isMobile ? "12px 0" : "16px 0" }} /> {/* Compact divider on mobile */}
 
                 <Row gutter={[16, 16]}>           {/* Stats grid */}
                   <Col xs={12} sm={6}>            {/* 2-up on mobile, 4-up on sm+ */}
-                    <Statistic title="Year 1" value={1} suffix="Showroom" />
+                    <Statistic title="Year 1" value={2022} />
                   </Col>
                   <Col xs={12} sm={6}>
-                    <Statistic title="Year 2" value={3} suffix="Showrooms" />
+                    <Statistic title="Year 2" value={2023} />
                   </Col>
                   <Col xs={12} sm={6}>
-                    <Statistic title="Year 3" value={9} suffix="Showrooms" />
+                    <Statistic title="Year 3" value={2024} />
                   </Col>
                   <Col xs={12} sm={6}>
-                    <Statistic title="Year 4" value={10} suffix="→ 27" />
+                    <Statistic title="Year 4" value={2025} />
                   </Col>
                 </Row>
               </Card>
@@ -246,7 +245,7 @@ export default function About() { // Default export of the About page
                         </Title>
                         <Paragraph style={{ marginBottom: 8 }}>{t.desc}</Paragraph>
                         <Tag color="red">
-                          <RocketOutlined /> Showrooms: <Text strong>{t.stat}</Text>
+                          <RocketOutlined /> Milestone: <Text strong>{t.stat}</Text>
                         </Tag>
                       </div>
                     ),
@@ -279,7 +278,7 @@ export default function About() { // Default export of the About page
                 <Paragraph style={{ marginBottom: 0 }}>
                   To be the most trusted two-wheeler brand in Bengaluru and beyond—recognized
                   for quality vehicles, delightful service, and an ownership experience that
-                  feels effortless. Bringing Shantha Motors within 15–20 minutes of every rider.
+                  feels effortless. Bringing {orgName} within 15–20 minutes of every rider.
                 </Paragraph>
               </Card>
             </Col>
@@ -328,7 +327,7 @@ export default function About() { // Default export of the About page
       <section style={{ ...styles.section, background: "#faf6f8" }}> {/* Themed background */}
         <div style={styles.container}>            {/* Centered container */}
           <Title level={2} style={{ textAlign: "center" }}>
-            Why Riders Choose Shantha Motors          {/* Section title */}
+            Why Riders Choose {orgName}          {/* Section title */}
           </Title>
 
           <Row gutter={[16, 16]}>
@@ -378,7 +377,7 @@ export default function About() { // Default export of the About page
           </Title>
           <Paragraph style={{ fontSize: isMobile ? 14 : 16 }}>
             From first bike to lifelong service partner, we’re here with expertise, warmth,
-            and a genuine smile. Visit your nearest showroom and feel the difference.
+            and a genuine smile. Reach out anytime and feel the difference.
           </Paragraph>
           <div
             style={{
@@ -391,10 +390,10 @@ export default function About() { // Default export of the About page
             <Button
               type="primary"                       // Primary CTA
               size={isMobile ? "middle" : "large"} // Smaller button on mobile
-              href="/locations"                    // Link to locations
+              href="/contact"                      // Link to contact
               icon={<EnvironmentOutlined />}       // Icon
             >
-              Find a Showroom                       {/* Button label */}
+              Contact {orgName}                       {/* Button label */}
             </Button>
             <Button
               size={isMobile ? "middle" : "large"} // Secondary size

@@ -1,11 +1,14 @@
 import axios from "axios";
 import { axiosInstance } from "./index";
+import { resolveUnifiedGasUrl } from '../utils/ownerConfig';
 
 // Stocks are backed by a Google Apps Script Web App, but browsers often hit CORS issues with direct calls.
 // Prefer calling our backend proxy (`/api/stocks/gas`) via `axiosInstance` and fall back to direct GAS only if needed.
 const DEFAULT_GAS_STOCKS_URL =
-  "https://script.google.com/macros/s/AKfycbzWT7aSLTZl-qW2peDaHMcsW_aA55ttVfheZThFfYpj7sMm09Mg_6Gp2xjc7Z0XNHmwpw/exec";
+  "https://script.google.com/macros/s/AKfycbz_DoNoD0XTx3RNMOSZfypbMqWVN4yTy3ct96aE4LhJ9yb_YvKr0GRbO_GA3Fgkwptb/exec?module=stocks";
 const DIRECT_GAS_STOCKS_URL = import.meta.env.VITE_STOCKS_GAS_URL || "";
+const getActiveGasUrl = () =>
+  resolveUnifiedGasUrl('stocks', DIRECT_GAS_STOCKS_URL || DEFAULT_GAS_STOCKS_URL);
 
 const isPlainObject = (v) => v && typeof v === "object" && !Array.isArray(v);
 const normalizeStockPatch = (patch = {}) => {
@@ -38,10 +41,11 @@ const normalizeStockPatch = (patch = {}) => {
 };
 
 const gasGet = async (params) => {
+  const activeGasUrl = getActiveGasUrl();
   // 1) Backend proxy (preferred)
   try {
     const res = await axiosInstance.get("/stocks/gas", {
-      params,
+      params: { ...params, ...(activeGasUrl ? { gasUrl: activeGasUrl } : {}) },
       validateStatus: () => true,
     });
     if (isPlainObject(res?.data)) return res.data;
@@ -50,7 +54,7 @@ const gasGet = async (params) => {
   }
 
   // 2) Direct GAS (fallback)
-  const url = DIRECT_GAS_STOCKS_URL || DEFAULT_GAS_STOCKS_URL;
+  const url = activeGasUrl || DEFAULT_GAS_STOCKS_URL;
   try {
     const res = await axios.get(url, { params, validateStatus: () => true });
     return res?.data || {};
@@ -60,9 +64,10 @@ const gasGet = async (params) => {
 };
 
 const gasPost = async (payload) => {
+  const activeGasUrl = getActiveGasUrl();
   // 1) Backend proxy (preferred)
   try {
-    const res = await axiosInstance.post("/stocks/gas", payload || {}, {
+    const res = await axiosInstance.post("/stocks/gas", { ...(payload || {}), ...(activeGasUrl ? { gasUrl: activeGasUrl } : {}) }, {
       validateStatus: () => true,
     });
     if (isPlainObject(res?.data)) return res.data;
@@ -71,7 +76,7 @@ const gasPost = async (payload) => {
   }
 
   // 2) Direct GAS (fallback)
-  const url = DIRECT_GAS_STOCKS_URL || DEFAULT_GAS_STOCKS_URL;
+  const url = activeGasUrl || DEFAULT_GAS_STOCKS_URL;
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -111,7 +116,7 @@ export const listStocksPublic = async ({ branch, mode, limit = 1000, page = 1 } 
   };
 };
 
-export const listCurrentStocks = async ({ branch, limit = 500, page = 1 } = {}) => {
+export const listCurrentStocks = async ({ branch, limit = 5000, page = 1 } = {}) => {
   const data = await gasGet({ action: "current", branch, limit, page });
   return {
     success: !!data.ok,
@@ -121,7 +126,7 @@ export const listCurrentStocks = async ({ branch, limit = 500, page = 1 } = {}) 
   };
 };
 
-export const listCurrentStocksPublic = async ({ branch, limit = 500, page = 1 } = {}) => {
+export const listCurrentStocksPublic = async ({ branch, limit = 5000, page = 1 } = {}) => {
   const data = await gasGet({ action: "current", branch, limit, page });
   return {
     success: !!data.ok,
@@ -132,7 +137,7 @@ export const listCurrentStocksPublic = async ({ branch, limit = 500, page = 1 } 
 };
 
 // Pending transfers must hit the backend (GAS does not track transfer admits/rejects)
-export const listPendingTransfers = async ({ branch, limit = 500 } = {}) => {
+export const listPendingTransfers = async ({ branch, limit = 5000 } = {}) => {
   const params = { action: "pending", limit };
   if (branch) params.branch = branch;
   const data = await gasGet(params);

@@ -1,11 +1,11 @@
 import React from 'react'
 import { Tabs, Grid } from 'antd'
 import InStockUpdate from '../InStockUpdate'
+import Branches from '../Admin/Branches'
 import StockUpdate from '../StockUpdate'
 import Bookings from '../Bookings'
 import Quotations from '../Quotations'
 import Jobcards from '../Jobcards'
-import Branches from '../Admin/Branches'
 import Announcements from '../Announcements'
 import useAnnouncementBadge from '../../hooks/useAnnouncementBadge'
 import Users from '../Admin/Users'
@@ -40,7 +40,7 @@ export default function Backend() {
     { key: 'jobcards', label: 'Job Cards', children: <Jobcards /> },
     { key: 'bookings', label: 'Bookings', children: <Bookings /> },
     { key: 'vehiclesearch', label: 'Vehicle Search', children: <VehicleSearch /> },
-    { key: 'vehiclecatalog', label: 'Vehicle Catalog', children: <VehicleCatalogManager csvFallbackUrl={import.meta.env.VITE_VEHICLE_SHEET_CSV_URL || "https://docs.google.com/spreadsheets/d/e/2PACX-1vQYGuNPY_2ivfS7MTX4bWiu1DWdF2mrHSCnmTznZVEHxNmsrgcGWjVZN4UDUTOzQQdXTnbeM-ylCJbB/pub?gid=408799621&single=true&output=csv"} /> },
+    { key: 'vehiclecatalog', label: 'Vehicle Catalog', children: <VehicleCatalogManager /> },
     // 4) Stock Update, 5) In-Stock Update
    { key: 'stock', label: 'Stock Movements', children: <StockUpdate /> },
        { key: 'instock', label: 'Display Vehicles', children: <InStockUpdate /> },

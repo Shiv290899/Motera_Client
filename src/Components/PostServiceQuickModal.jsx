@@ -5,6 +5,9 @@ import { saveJobcardViaWebhook } from "../apiCalls/forms";
 import PostServiceSheet from "./PostServiceSheet";
 import { handleSmartPrint } from "../utils/printUtils";
 
+const REGEX_FULL = /^[A-Z]{2}\d{2}[A-Z]{2}\d{4}$/;
+const normalizeReg = (val) => String(val || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+
 /**
  * Lightweight Post Service modal for Follow-Ups → Job Card rows.
  * - Reuses the Apps Script webhook action `postService` (same as JobCard.jsx)
@@ -78,6 +81,11 @@ export default function PostServiceQuickModal({ open, onClose, row, webhookUrl }
         message.error("Missing/invalid 10-digit mobile.");
         return;
       }
+      const regNo = normalizeReg(valsForPrint?.regNo || "");
+      if (!REGEX_FULL.test(regNo)) {
+        message.error("Enter vehicle no. in format KA05DB6000.");
+        return;
+      }
       const jc = String(valsForPrint?.jcNo || "").trim();
       const a1 = Number(pay1Amt || 0) || 0;
       const a2 = Number(pay2Amt || 0) || 0;
@@ -124,7 +132,7 @@ export default function PostServiceQuickModal({ open, onClose, row, webhookUrl }
           mechanic: fvRow?.mechanic || "",
           executive: valsForPrint.executive || "",
           expectedDelivery: expectedDeliveryStr || null,
-          regNo: valsForPrint.regNo || "",
+          regNo,
           model: valsForPrint.model || "",
           colour: valsForPrint.colour || "",
           km: kmDigits,
@@ -151,7 +159,7 @@ export default function PostServiceQuickModal({ open, onClose, row, webhookUrl }
           custMobile: mobile10,
           branch: valsForPrint.branch || '',
           executive: valsForPrint.executive || '',
-          regNo: valsForPrint.regNo || '',
+          regNo,
           serviceType: String(serviceType || ''),
           vehicleType: String(vehicleType || ''),
           mechanic: String(fvRow?.mechanic || ''),

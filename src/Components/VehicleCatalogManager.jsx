@@ -3,6 +3,7 @@ import dayjs from 'dayjs'
 import { Table, Button, Space, Modal, Form, Input, InputNumber, message, Popconfirm, Alert, Typography, Tag, Select, Grid } from 'antd'
 import { ReloadOutlined, PlusOutlined, EditOutlined } from '@ant-design/icons'
 import { exportToCsv } from '../utils/csvExport'
+import { getOwnerWebhookUrl, readLocalUser, resolveUnifiedGasUrl } from '../utils/ownerConfig'
 
 const { Text } = Typography
 
@@ -55,6 +56,11 @@ const buildCatalogKey = (company, model, variant) => {
   const toKey = (s) => String(s || '').trim().toUpperCase()
   return [toKey(company), toKey(model), toKey(variant)].join('|')
 }
+const appendQuery = (url, params = {}) => {
+  const q = new URLSearchParams(params).toString()
+  if (!q) return url
+  return `${url}${url.includes('?') ? '&' : '?'}${q}`
+}
 
 const normalizeRow = (row = {}) => {
   const rawPrice =
@@ -75,28 +81,19 @@ const normalizeRow = (row = {}) => {
   const variant = pick(row, HEADERS.variant) || row.variant || ''
   let price = num(rawPrice)
   let color = String(rawColor || '').trim()
-  const rawKey = row.key || row.Key || ''
   const rawUpdatedAt = row.UpdatedAt || row.updatedAt || row.updated_at || row.updated || ''
   const rawUpdatedBy = row.UpdatedBy || row.updatedBy || row.updated_by || row.user || ''
   const looksLikeDate = (v) => {
     const d = new Date(v)
     return !Number.isNaN(d.getTime())
   }
-  const looksLikeKey = (v) => String(v || '').includes('|')
-  const fallbackKey = buildCatalogKey(company, model, variant)
   let updatedAt = rawUpdatedAt
   let updatedBy = rawUpdatedBy
-  let key = rawKey || fallbackKey
-  if (!looksLikeKey(key) || key === '') key = fallbackKey
   const maybeShifted = !isNumericLike(rawPrice) && isNumericLike(rawColor) && price === 0
   if (maybeShifted) {
     price = num(rawColor)
     color = ''
-    if (looksLikeKey(rawPrice)) key = rawPrice
-    if (!rawUpdatedBy && looksLikeDate(rawKey)) {
-      updatedAt = rawKey
-      updatedBy = rawUpdatedAt
-    }
+    if (!rawUpdatedBy && looksLikeDate(rawUpdatedAt)) updatedBy = rawUpdatedAt
   }
   return {
     id: row.id || row._id || row.rowId || row._row || undefined,
@@ -107,14 +104,25 @@ const normalizeRow = (row = {}) => {
     onRoadPrice: price,
     updatedAt,
     updatedBy,
-    key,
   }
 }
 
 export default function VehicleCatalogManager({ csvFallbackUrl }) {
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
-  const GAS_URL = import.meta.env.VITE_VEHICLE_CATALOG_GAS_URL || 'https://script.google.com/macros/s/AKfycbw0zvptYU-X0yBRFytBJZeli0Dr-uOBFDSfpYgQeWv7nKMWXD73piVndyyTiARU0FL-Lg/exec'
+  const sessionUser = readLocalUser()
+  const sessionRole = String(sessionUser?.role || '').trim().toLowerCase()
+  const enforceOwnerWebhook =
+    sessionRole === 'owner' ||
+    sessionRole === 'staff' ||
+    sessionRole === 'mechanic' ||
+    sessionRole === 'callboy'
+  const ownerWebhookUrl = getOwnerWebhookUrl()
+  const envCatalogUrl = String(import.meta.env.VITE_VEHICLE_CATALOG_GAS_URL || '').trim()
+  const GAS_URL = resolveUnifiedGasUrl(
+    'catalog',
+    enforceOwnerWebhook ? (ownerWebhookUrl || '') : envCatalogUrl
+  )
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -133,7 +141,7 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
 
   const listVehicleCatalog = async () => {
     if (!GAS_URL) throw new Error('VEHICLE_CATALOG_GAS_URL is not configured')
-    const url = `${GAS_URL}?action=list`
+    const url = appendQuery(GAS_URL, { action: 'list' })
     const res = await fetch(url, { method: 'GET', mode: 'cors', credentials: 'omit' })
     if (!res.ok) throw new Error('Failed to fetch catalog')
     return res.json()
@@ -170,6 +178,12 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
   const load = async () => {
     setLoading(true)
     setGasMissing(false)
+    if (!GAS_URL) {
+      setRows([])
+      setGasMissing(true)
+      setLoading(false)
+      return
+    }
     try {
       const resp = await listVehicleCatalog()
       const data = resp?.data || resp?.items || resp?.rows || resp || []
@@ -177,8 +191,8 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
       setRows(norm)
       if (resp?.ok === false && /catalog gas url/i.test(String(resp?.message || ''))) setGasMissing(true)
     } catch  {
-      // Fallback to CSV if provided
-      if (csvFallbackUrl) {
+      // Do not allow CSV/default fallback for authenticated owner/staff-like sessions.
+      if (!enforceOwnerWebhook && csvFallbackUrl) {
         try {
           const csvRows = await fetchSheetRowsCSV(csvFallbackUrl)
           const norm = csvRows.map(normalizeRow).filter((r) => r.company && r.model && r.variant)
@@ -189,6 +203,7 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
         }
       } else {
         setRows([])
+        setGasMissing(true)
       }
     } finally {
       setLoading(false)
@@ -219,7 +234,7 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
     try {
       setSaving(true)
       const id = record.id || record.rowId || undefined
-      const payload = { id, company: record.company, model: record.model, variant: record.variant, key: catalogKey(record) }
+      const payload = { id, company: record.company, model: record.model, variant: record.variant }
       const resp = await deleteVehicleCatalogRow(payload)
       const ok = (resp?.success ?? resp?.ok ?? true) !== false
       if (!ok) throw new Error(resp?.message || 'Delete failed')
@@ -273,7 +288,6 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
         ...values,
         onRoadPrice: Number(values.onRoadPrice || 0) || 0,
         id: editing?.id,
-        key: editing?.key || catalogKey(values),
         updatedBy: (() => {
           try {
             const u = JSON.parse(localStorage.getItem('user') || 'null')
@@ -410,7 +424,11 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
           type="warning"
           style={{ marginBottom: 12 }}
           message="Catalog GAS URL not configured"
-          description="Listing works from the published CSV, but saving/updating requires VEHICLE_CATALOG_GAS_URL in the environment."
+          description={
+            enforceOwnerWebhook
+              ? "Owner/Staff session requires Owner Profile webhook URL. Configure owner webhook URL to load and save catalog."
+              : "Listing can use CSV fallback, but saving/updating requires VEHICLE_CATALOG_GAS_URL in the environment."
+          }
         />
       )}
       <div style={{ marginBottom: 12, fontSize: 12, color: '#475569' }}>
@@ -421,7 +439,7 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
         columns={columns}
         dataSource={filteredRows}
         loading={loading}
-        rowKey={(r) => r.id || r.key || catalogKey(r)}
+        rowKey={(r) => r.id || catalogKey(r)}
         tableLayout={isMobile ? "auto" : "fixed"}
         scroll={isMobile ? { x: 'max-content' } : undefined}
         pagination={{

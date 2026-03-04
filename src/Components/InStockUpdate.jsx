@@ -19,7 +19,6 @@ export default function InStockUpdate() {
   const [companies, setCompanies] = useState([]);
   const [, setModels] = useState([]);
   const [, setVariants] = useState([]);
-  const [colors, setColors] = useState([]);
 
   const [selCompanies, setSelCompanies] = useState([]);
   const [selModels, setSelModels] = useState([]);
@@ -87,6 +86,26 @@ export default function InStockUpdate() {
   const currentUser = useMemo(() => { try { return JSON.parse(localStorage.getItem('user')||'null'); } catch { return null; } }, []);
   const myRole = useMemo(() => String(currentUser?.role || '').toLowerCase(), [currentUser]);
   const isAdminOwner = useMemo(() => ['admin', 'owner', 'backend'].includes(myRole), [myRole]);
+  const linkedBranches = useMemo(() => {
+    const list = [];
+    const push = (v) => {
+      const name = String(typeof v === 'string' ? v : (v?.name || '')).trim();
+      if (name) list.push(name);
+    };
+    push(currentUser?.formDefaults?.branchName);
+    push(currentUser?.primaryBranch?.name);
+    if (Array.isArray(currentUser?.branches)) currentUser.branches.forEach(push);
+    return uniqCaseInsensitive(list);
+  }, [currentUser]);
+  const canTransfer = useMemo(() => {
+    // Owner/Admin/Backend: trust live active branches list first.
+    if (isAdminOwner) {
+      if (branchOptions.length > 1) return true;
+      return linkedBranches.length > 1;
+    }
+    // Other roles: only linked branches in their profile.
+    return linkedBranches.length > 1;
+  }, [isAdminOwner, branchOptions, linkedBranches]);
 
   useEffect(() => {
     (async () => {
@@ -159,7 +178,6 @@ export default function InStockUpdate() {
     setCompanies(uniqCaseInsensitive(items.map((r)=>r.company)));
     setModels(uniqCaseInsensitive(items.map((r)=>r.model)));
     setVariants(uniqCaseInsensitive(items.map((r)=>r.variant)));
-    setColors(uniqCaseInsensitive(items.map((r)=>r.color)));
   }, [items]);
 
   // Dependent options for Model and Variant based on current selections
@@ -182,6 +200,22 @@ export default function InStockUpdate() {
       : base1;
     return uniqCaseInsensitive(base2.map((r) => r.variant));
   }, [items, selCompanies, selModels]);
+
+  const colorOptionsFiltered = useMemo(() => {
+    const companySet = toKeySet(selCompanies);
+    const base1 = companySet.size
+      ? items.filter((r) => companySet.has(normalizeKey(r.company)))
+      : items;
+    const modelSet = toKeySet(selModels);
+    const base2 = modelSet.size
+      ? base1.filter((r) => modelSet.has(normalizeKey(r.model)))
+      : base1;
+    const variantSet = toKeySet(selVariants);
+    const base3 = variantSet.size
+      ? base2.filter((r) => variantSet.has(normalizeKey(r.variant)))
+      : base2;
+    return uniqCaseInsensitive(base3.map((r) => r.color));
+  }, [items, selCompanies, selModels, selVariants]);
 
   // When upstream selections change, prune downstream selections so they remain valid
   const onCompaniesChange = (vals) => {
@@ -219,6 +253,15 @@ export default function InStockUpdate() {
     setSelVariants(nextVariants);
     setSelModels(vals);
   };
+
+  // Keep selected colors valid for current Company/Model/Variant scope
+  useEffect(() => {
+    const allowedColorSet = toKeySet(colorOptionsFiltered);
+    const nextColors = selColors.filter((c) => allowedColorSet.has(normalizeKey(c)));
+    if (nextColors.length !== selColors.length) {
+      setSelColors(nextColors);
+    }
+  }, [colorOptionsFiltered, selColors]);
 
   const filtered = useMemo(() => {
     const s = String(q || "").toLowerCase();
@@ -319,6 +362,10 @@ export default function InStockUpdate() {
   };
 
   const openMovementModal = (nextAction, r) => {
+    if (nextAction === 'transfer' && !canTransfer) {
+      message.info('Transfer is available only when more than one branch is linked to this account.');
+      return;
+    }
     setMovementAction(nextAction);
     setMovementRow(r);
     movementForm.resetFields();
@@ -460,7 +507,9 @@ export default function InStockUpdate() {
       isAdminOwner ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <Space size={4}>
-            <Button size="small" onClick={() => openMovementModal('transfer', r)} style={{ fontSize: 11, height: 20, padding: '0 8px' }}>Transfer</Button>
+            {canTransfer ? (
+              <Button size="small" onClick={() => openMovementModal('transfer', r)} style={{ fontSize: 11, height: 20, padding: '0 8px' }}>Transfer</Button>
+            ) : null}
             <Button size="small" type="primary" onClick={() => openBookingModal(r)} style={{ fontSize: 11, height: 20, padding: '0 8px' }}>Book</Button>
           </Space>
           <Space size={4}>
@@ -556,7 +605,7 @@ export default function InStockUpdate() {
             style={{ minWidth: 180 }}
             value={selColors}
             onChange={setSelColors}
-            options={colors.map((v)=>({ value: v, label: v }))}
+            options={colorOptionsFiltered.map((v)=>({ value: v, label: v }))}
             maxTagCount={isMobile ? 1 : 3}
           />
           <DatePicker.RangePicker value={dateRange} onChange={setDateRange} allowClear style={{ minWidth: 220 }} />

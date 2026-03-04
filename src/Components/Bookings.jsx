@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Table, Grid, Space, Button, Select, Input, Tag, message, Popover, Tooltip, Typography, Modal, Upload, DatePicker, AutoComplete, Form, Divider, Row, Col } from "antd";
+import { Table, Grid, Space, Button, Select, Input, Tag, message, Popover, Tooltip, Typography, Modal, Upload, DatePicker, AutoComplete, Form, Divider, Row, Col, Card } from "antd";
 import useDebouncedValue from "../hooks/useDebouncedValue";
 // Sheet-only remarks; no backend remarks API
 import dayjs from 'dayjs';
 import BookingPrintQuickModal from "./BookingPrintQuickModal";
 import BookingInlineModal from "./BookingInlineModal";
 import BookingForm from "./BookingForm";
+import BookingHistoryButton from "./BookingHistoryButton";
 import { saveBookingViaWebhook } from "../apiCalls/forms";
+import { resolveUnifiedGasUrl } from '../utils/ownerConfig';
 import { createStock, listCurrentStocksPublic } from "../apiCalls/stocks";
 import { listBranchesPublic } from "../apiCalls/branches";
 import { listUsersPublic } from "../apiCalls/adminUsers";
@@ -34,6 +36,29 @@ const HEAD = {
 };
 
 const pick = (obj, aliases) => String(aliases.map((k) => obj[k] ?? "").find((v) => v !== "") || "").trim();
+const unwrapWebhookBody = (input) => {
+  let cur = input;
+  for (let i = 0; i < 4; i += 1) {
+    if (!cur || typeof cur !== "object" || Array.isArray(cur)) break;
+    const next = cur.data;
+    if (next && typeof next === "object" && !Array.isArray(next)) {
+      cur = next;
+      continue;
+    }
+    break;
+  }
+  return cur && typeof cur === "object" ? cur : {};
+};
+
+const normalizeWebhookResult = (resp) => {
+  const root = resp?.data || resp || {};
+  const body = unwrapWebhookBody(root);
+  const rows = Array.isArray(body?.data) ? body.data : (Array.isArray(body?.rows) ? body.rows : []);
+  const totalCandidates = [body?.total, body?.count, body?.totalRows, body?.totalCount, root?.total, root?.count];
+  const total = totalCandidates.find((v) => Number.isFinite(Number(v)));
+  const ok = Boolean(body?.ok || body?.success || root?.ok || root?.success || Array.isArray(body?.data) || Array.isArray(body?.rows));
+  return { ok, rows, total: total === undefined ? null : Number(total) };
+};
 
 export default function Bookings() {
   const screens = Grid.useBreakpoint();
@@ -43,7 +68,7 @@ export default function Bookings() {
   const [loading, setLoading] = useState(false);
   const [branchFilter, setBranchFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [dateRange, setDateRange] = useState(null); // [dayjs, dayjs]
+  const [dateRange, setDateRange] = useState(() => [dayjs().startOf('month'), dayjs()]); // [dayjs, dayjs]
   const [quickKey, setQuickKey] = useState(null); // 'today' | 'yesterday' | null
   const [, setUpdating] = useState(null);
   const [printModal, setPrintModal] = useState({ open: false, row: null });
@@ -53,9 +78,9 @@ export default function Bookings() {
   const debouncedQ = useDebouncedValue(q, 300);
   // Controlled pagination
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(25);
   const [renderMode, setRenderMode] = useState('pagination'); // 'pagination' | 'loadMore'
-  const [loadedCount, setLoadedCount] = useState(10);
+  const [loadedCount, setLoadedCount] = useState(25);
   const [totalCount, setTotalCount] = useState(0);
   // Default to server pagination without requiring env var
   const USE_SERVER_PAG = String((import.meta.env.VITE_USE_SERVER_PAGINATION ?? 'true')).toLowerCase() === 'true';
@@ -69,6 +94,8 @@ export default function Bookings() {
   const [executiveOptions, setExecutiveOptions] = useState([]);
   const [dropdownLoading, setDropdownLoading] = useState(false);
   const [filterSourceRows, setFilterSourceRows] = useState([]);
+  const [summaryRows, setSummaryRows] = useState([]);
+  const [summaryLoading, setSummaryLoading] = useState(false);
   const [stockItems, setStockItems] = useState([]);
   const [stockLoading, setStockLoading] = useState(false);
   const [stockLoadedAt, setStockLoadedAt] = useState(0);
@@ -151,8 +178,8 @@ export default function Bookings() {
 
   // Reuse the same GAS URL for list + print so search works
   const DEFAULT_BOOKING_GAS_URL =
-    "https://script.google.com/macros/s/AKfycbwSn5hp1cSWlJMGhe2cYUtid2Ruqh9H13mZbq0PwBpYB0lMLufZbIjZ5zioqtKgE_0sNA/exec";
-  const GAS_URL_STATIC = import.meta.env.VITE_BOOKING_GAS_URL || DEFAULT_BOOKING_GAS_URL;
+    "https://script.google.com/macros/s/AKfycbz_DoNoD0XTx3RNMOSZfypbMqWVN4yTy3ct96aE4LhJ9yb_YvKr0GRbO_GA3Fgkwptb/exec?module=booking";
+  const GAS_URL_STATIC = resolveUnifiedGasUrl('booking', import.meta.env.VITE_BOOKING_GAS_URL || DEFAULT_BOOKING_GAS_URL);
   const GAS_SECRET_STATIC = import.meta.env.VITE_BOOKING_GAS_SECRET || '';
 
   const cacheKey = (() => {
@@ -162,11 +189,18 @@ export default function Bookings() {
   })();
 
   const mapRow = useCallback((o, idx = 0) => {
+    const obj = (o && o.values) ? o.values : o;
     let payload = {};
     try {
-      payload = typeof o['Raw Payload'] === 'object'
-        ? (o['Raw Payload'] || {})
-        : JSON.parse(String(o['Raw Payload'] || o.rawPayload || o.payload || '{}'));
+      const rawPayload =
+        (o && o.payload) ||
+        obj?.['Raw Payload'] ||
+        obj?.rawPayload ||
+        obj?.payload ||
+        '{}';
+      payload = typeof rawPayload === 'object'
+        ? (rawPayload || {})
+        : JSON.parse(String(rawPayload || '{}'));
     } catch { payload = {}; }
     const payloadColor =
       payload?.color ||
@@ -177,27 +211,48 @@ export default function Bookings() {
     const remarkLevelRaw = (payload?.remark?.level || o.RemarkLevel || o.remarkLevel || '').toString();
     const remarkTextRaw = payload?.remark?.text || o.RemarkText || o.remarkText || '';
     const remarkLevelNorm = String(remarkLevelRaw || '').toLowerCase();
+    const vehicleNo =
+      String(
+        obj?.['Vehicle No'] ||
+        obj?.Vehicle_No ||
+        obj?.vehicleNo ||
+        payload?.vehicleNo ||
+        payload?.regNo ||
+        payload?.vehicle?.regNo ||
+        ''
+      ).trim().toUpperCase();
+    const invoiceStatus = String(obj?.['Invoice Status'] || obj?.invoiceStatus || payload?.invoiceStatus || '').trim();
+    const invoiceFileUrl = String(obj?.['Invoice File URL'] || obj?.Invoice_File_URL || obj?.invoiceFileUrl || payload?.invoiceFileUrl || '').trim();
+    const insuranceStatus = String(obj?.['Insurance Status'] || obj?.insuranceStatus || payload?.insuranceStatus || '').trim();
+    const insuranceFileUrl = String(obj?.['Insurance File URL'] || obj?.Insurance_File_URL || obj?.insuranceFileUrl || payload?.insuranceFileUrl || '').trim();
+    const rtoStatus = String(obj?.['RTO Status'] || obj?.rtoStatus || payload?.rtoStatus || '').trim();
     return {
       key: idx,
-      ts: pick(o, HEAD.ts),
-      tsMs: parseTsMs(pick(o, HEAD.ts)),
-      bookingId: pick(o, HEAD.bookingId),
-      name: pick(o, HEAD.name),
-      mobile: pick(o, HEAD.mobile),
-      company: pick(o, HEAD.company),
-      model: pick(o, HEAD.model),
-      variant: pick(o, HEAD.variant),
-      color: pick(o, HEAD.color) || String(payloadColor || '').trim(),
-      chassis: pick(o, HEAD.chassis),
-      fileUrl: pick(o, HEAD.file),
-      branch: pick(o, HEAD.branch),
-      status: (pick(o, HEAD.status) || 'pending').toLowerCase(),
-      availability: pick(o, HEAD.availability),
-      RemarkLevel: remarkLevelRaw || '',
-      RemarkText: remarkTextRaw || '',
+      ts: pick(obj, HEAD.ts),
+      tsMs: parseTsMs(pick(obj, HEAD.ts)),
+      bookingId: pick(obj, HEAD.bookingId),
+      name: pick(obj, HEAD.name),
+      mobile: pick(obj, HEAD.mobile),
+      company: pick(obj, HEAD.company),
+      model: pick(obj, HEAD.model),
+      variant: pick(obj, HEAD.variant),
+      color: pick(obj, HEAD.color) || String(payloadColor || '').trim(),
+      chassis: pick(obj, HEAD.chassis),
+      fileUrl: pick(obj, HEAD.file),
+      branch: pick(obj, HEAD.branch),
+      status: (pick(obj, HEAD.status) || 'pending').toLowerCase(),
+      availability: pick(obj, HEAD.availability),
+      vehicleNo,
+      invoiceStatus,
+      invoiceFileUrl,
+      insuranceStatus,
+      insuranceFileUrl,
+      rtoStatus,
+      RemarkLevel: remarkLevelRaw || obj?.RemarkLevel || '',
+      RemarkText: remarkTextRaw || obj?.RemarkText || '',
       _remarkLevel: remarkLevelNorm,
       _remarkText: remarkTextRaw || '',
-      _raw: o,
+      _raw: obj,
     };
   }, []);
 
@@ -225,15 +280,60 @@ export default function Bookings() {
           ? { action: 'list', page: 1, pageSize: 5000, secret: GAS_SECRET_STATIC }
           : { action: 'list', page: 1, pageSize: 5000 };
         const resp = await saveBookingViaWebhook({ webhookUrl: GAS_URL_STATIC, method: 'GET', payload });
-        const js = resp?.data || resp;
-        const dataArr = Array.isArray(js?.data) ? js.data : [];
-        const mapped = dataArr.map((o, idx) => mapRow(o, idx));
+        const parsed = normalizeWebhookResult(resp);
+        const mapped = parsed.rows.map((o, idx) => mapRow(o, idx));
         if (!cancelled) setFilterSourceRows(mapped);
       } catch { /* ignore filter fetch failures */ }
     };
     load();
     return () => { cancelled = true; };
   }, [GAS_URL_STATIC, GAS_SECRET_STATIC, mapRow]);
+
+  // Fetch all rows for branch summary (respects filters)
+  useEffect(() => {
+    let cancelled = false;
+    const loadAll = async () => {
+      if (!GAS_URL_STATIC) return;
+      setSummaryLoading(true);
+      try {
+        const SECRET = import.meta.env.VITE_BOOKING_GAS_SECRET || '';
+        const pageSize = 5000;
+        let page = 1;
+        let all = [];
+        for (;;) {
+          const base = { action: 'list' };
+          const filters = {
+            q: debouncedQ || '',
+            branch: branchFilter !== 'all' ? branchFilter : '',
+            status: statusFilter !== 'all' ? statusFilter : '',
+          };
+          if (dateRange && dateRange[0] && dateRange[1]) {
+            filters.start = dateRange[0].startOf('day').valueOf();
+            filters.end = dateRange[1].endOf('day').valueOf();
+          }
+          const payload = SECRET
+            ? { ...base, page, pageSize, ...filters, secret: SECRET }
+            : { ...base, page, pageSize, ...filters };
+          const resp = await saveBookingViaWebhook({ webhookUrl: GAS_URL_STATIC, method: 'GET', payload });
+          const parsed = normalizeWebhookResult(resp);
+          const dataArr = parsed.rows;
+          all = all.concat(dataArr.map((o, idx) => mapRow(o, idx)));
+          const total = typeof parsed?.total === 'number' ? parsed.total : null;
+          if (total !== null && all.length >= total) break;
+          if (dataArr.length === 0) break;
+          page += 1;
+          if (page > 200) break;
+        }
+        if (!cancelled) setSummaryRows(all);
+      } catch {
+        if (!cancelled) setSummaryRows([]);
+      } finally {
+        if (!cancelled) setSummaryLoading(false);
+      }
+    };
+    loadAll();
+    return () => { cancelled = true; };
+  }, [debouncedQ, branchFilter, statusFilter, dateRange, GAS_URL_STATIC, mapRow]);
 
   // Server-mode: refetch on filters/page change
   useEffect(() => {
@@ -267,13 +367,13 @@ export default function Bookings() {
           method: 'GET',
           payload,
         });
-        const js = resp?.data || resp;
-        if (!js?.ok || !Array.isArray(js?.data)) throw new Error('Invalid response');
-        const data = js.data.map((o, idx) => mapRow(o, idx));
+        const parsed = normalizeWebhookResult(resp);
+        if (!parsed.ok) throw new Error('Invalid response');
+        const data = parsed.rows.map((o, idx) => mapRow(o, idx));
         const filteredRows = data.filter((r)=>r.bookingId || r.name || r.mobile);
         if (!cancelled) {
           setRows(filteredRows);
-          const nextTotal = typeof js.total === 'number' ? js.total : filteredRows.length;
+          const nextTotal = typeof parsed.total === 'number' ? parsed.total : filteredRows.length;
           setTotalCount(nextTotal);
           const map = {}; filteredRows.forEach(rr => {
             if (rr.bookingId) map[rr.bookingId] = { level: rr._remarkLevel || String(rr.RemarkLevel||'').toLowerCase(), text: rr._remarkText || rr.RemarkText || '' };
@@ -363,9 +463,8 @@ export default function Bookings() {
     }
     const payload = GAS_SECRET_STATIC ? { ...base, ...filters, secret: GAS_SECRET_STATIC } : { ...base, ...filters };
     const resp = await saveBookingViaWebhook({ webhookUrl: GAS_URL_STATIC, method: 'GET', payload });
-    const js = resp?.data || resp;
-    const dataArr = Array.isArray(js?.data) ? js.data : [];
-    return dataArr.map((o, idx) => mapRow(o, idx)).filter((r)=>r.bookingId || r.name || r.mobile);
+    const parsed = normalizeWebhookResult(resp);
+    return parsed.rows.map((o, idx) => mapRow(o, idx)).filter((r)=>r.bookingId || r.name || r.mobile);
   }, [USE_SERVER_PAG, GAS_URL_STATIC, GAS_SECRET_STATIC, branchFilter, dateRange, debouncedQ, mapRow, statusFilter, rows]);
 
   const handleExportCsv = async () => {
@@ -487,10 +586,36 @@ export default function Bookings() {
 
   const updateBooking = async (bookingId, patch, mobile) => {
     let ok = false;
+    let previousRows = null;
+    const applyPatchLocally = (list = []) => list.map((r) => {
+      if (r.bookingId !== bookingId) return r;
+      const next = { ...r };
+      if (patch.status) next.status = String(patch.status).toLowerCase();
+      if (patch.invoiceStatus) next.invoiceStatus = patch.invoiceStatus;
+      if (patch.invoiceFileUrl || patch.invoiceFile) next.invoiceFileUrl = patch.invoiceFileUrl || patch.invoiceFile;
+      if (patch.insuranceStatus) next.insuranceStatus = patch.insuranceStatus;
+      if (patch.insuranceFileUrl || patch.insuranceFile) next.insuranceFileUrl = patch.insuranceFileUrl || patch.insuranceFile;
+      if (patch.rtoStatus) next.rtoStatus = patch.rtoStatus;
+      if (patch.vehicleNo || patch.regNo) next.vehicleNo = String(patch.vehicleNo || patch.regNo).toUpperCase();
+      if (Object.prototype.hasOwnProperty.call(patch, 'chassis')) next.chassis = patch.chassis;
+      if (Object.prototype.hasOwnProperty.call(patch, 'chassisNo')) next.chassis = patch.chassisNo;
+      next._raw = {
+        ...(r._raw || {}),
+        ...patch,
+        ...(patch.vehicleNo || patch.regNo ? { 'Vehicle No': String(patch.vehicleNo || patch.regNo).toUpperCase() } : {}),
+        ...(patch.invoiceStatus ? { 'Invoice Status': patch.invoiceStatus } : {}),
+        ...(patch.invoiceFileUrl || patch.invoiceFile ? { 'Invoice File URL': patch.invoiceFileUrl || patch.invoiceFile } : {}),
+        ...(patch.insuranceStatus ? { 'Insurance Status': patch.insuranceStatus } : {}),
+        ...(patch.insuranceFileUrl || patch.insuranceFile ? { 'Insurance File URL': patch.insuranceFileUrl || patch.insuranceFile } : {}),
+        ...(patch.rtoStatus ? { 'RTO Status': patch.rtoStatus } : {}),
+        ...(patch.status ? { Status: patch.status } : {}),
+      };
+      return next;
+    });
     try {
       setUpdating(bookingId);
-      const DEFAULT_BOOKING_GAS_URL ="https://script.google.com/macros/s/AKfycbwSn5hp1cSWlJMGhe2cYUtid2Ruqh9H13mZbq0PwBpYB0lMLufZbIjZ5zioqtKgE_0sNA/exec";
-      const GAS_URL = import.meta.env.VITE_BOOKING_GAS_URL || DEFAULT_BOOKING_GAS_URL;
+      const DEFAULT_BOOKING_GAS_URL ="https://script.google.com/macros/s/AKfycbz_DoNoD0XTx3RNMOSZfypbMqWVN4yTy3ct96aE4LhJ9yb_YvKr0GRbO_GA3Fgkwptb/exec?module=booking";
+      const GAS_URL = resolveUnifiedGasUrl('booking', import.meta.env.VITE_BOOKING_GAS_URL || DEFAULT_BOOKING_GAS_URL);
       const SECRET = import.meta.env.VITE_BOOKING_GAS_SECRET || '';
       // Mirror patch keys to exact Sheet headers to ensure update reflects
       const p = patch || {};
@@ -500,29 +625,23 @@ export default function Bookings() {
       if (p.insuranceStatus) sheetPatch['Insurance Status'] = p.insuranceStatus;
       if (p.insuranceFileUrl || p.insuranceFile) sheetPatch['Insurance File URL'] = p.insuranceFileUrl || p.insuranceFile;
       if (p.rtoStatus) sheetPatch['RTO Status'] = p.rtoStatus;
-      if (p.vehicleNo || p.regNo) sheetPatch['Vehicle No'] = p.vehicleNo || p.regNo;
+      if (p.vehicleNo || p.regNo) {
+        const veh = String(p.vehicleNo || p.regNo).toUpperCase();
+        sheetPatch['Vehicle No'] = veh;
+        // Keep alternative legacy header too, if GAS script expects different column name.
+        sheetPatch['Vehicle Number'] = veh;
+      }
       if (p.status) sheetPatch['Status'] = p.status;
+      // Optimistic row update for instant UI feedback.
+      setRows((prev) => {
+        previousRows = prev;
+        return applyPatchLocally(prev);
+      });
       await saveBookingViaWebhook({ webhookUrl: GAS_URL, method: 'POST', payload: SECRET ? { action: 'update', bookingId, mobile, patch: sheetPatch, secret: SECRET } : { action: 'update', bookingId, mobile, patch: sheetPatch } });
-      // Optimistic merge of patched fields into row
-      setRows((prev)=> prev.map(r=> {
-        if (r.bookingId !== bookingId) return r;
-        const next = { ...r };
-        if (patch.status) next.status = String(patch.status).toLowerCase();
-        // Attach common extended fields for immediate visibility
-        if (patch.invoiceStatus) next.invoiceStatus = patch.invoiceStatus;
-        if (patch.invoiceFileUrl || patch.invoiceFile) next.invoiceFileUrl = patch.invoiceFileUrl || patch.invoiceFile;
-        if (patch.insuranceStatus) next.insuranceStatus = patch.insuranceStatus;
-        if (patch.insuranceFileUrl || patch.insuranceFile) next.insuranceFileUrl = patch.insuranceFileUrl || patch.insuranceFile;
-        if (patch.rtoStatus) next.rtoStatus = patch.rtoStatus;
-        if (patch.vehicleNo || patch.regNo) next.vehicleNo = patch.vehicleNo || patch.regNo;
-        if (Object.prototype.hasOwnProperty.call(patch, 'chassis')) next.chassis = patch.chassis;
-        if (Object.prototype.hasOwnProperty.call(patch, 'chassisNo')) next.chassis = patch.chassisNo;
-        next._raw = { ...(r._raw || {}), ...patch };
-        return next;
-      }));
       message.success('Updated');
       ok = true;
     } catch {
+      if (previousRows) setRows(previousRows);
       message.error('Update failed');
       ok = false;
     }
@@ -532,8 +651,8 @@ export default function Bookings() {
 
   // Minimal upload helper to GAS (same endpoint used by BookingForm)
   const uploadFileToGAS = async (file) => {
-    const DEFAULT_BOOKING_GAS_URL = "https://script.google.com/macros/s/AKfycbwSn5hp1cSWlJMGhe2cYUtid2Ruqh9H13mZbq0PwBpYB0lMLufZbIjZ5zioqtKgE_0sNA/exec";
-    const GAS_URL = import.meta.env.VITE_BOOKING_GAS_URL || DEFAULT_BOOKING_GAS_URL;
+    const DEFAULT_BOOKING_GAS_URL = "https://script.google.com/macros/s/AKfycbz_DoNoD0XTx3RNMOSZfypbMqWVN4yTy3ct96aE4LhJ9yb_YvKr0GRbO_GA3Fgkwptb/exec?module=booking";
+    const GAS_URL = resolveUnifiedGasUrl('booking', import.meta.env.VITE_BOOKING_GAS_URL || DEFAULT_BOOKING_GAS_URL);
     const SECRET = import.meta.env.VITE_BOOKING_GAS_SECRET || '';
     if (!GAS_URL) throw new Error('GAS URL not configured');
     const fd = new FormData();
@@ -1102,6 +1221,20 @@ export default function Bookings() {
   const total = USE_SERVER_PAG ? totalCount : rows.length;
   const tableHeight = isMobile ? 420 : 600;
   const visibleRows = USE_SERVER_PAG ? filtered : (renderMode === 'loadMore' ? filtered.slice(0, loadedCount) : filtered);
+  const branchSummary = useMemo(() => {
+    const scoped = summaryRows.length ? summaryRows : applyFilters(filterSourceRows.length ? filterSourceRows : rows);
+    const map = new Map();
+    (scoped || []).forEach((r) => {
+      const label = String(r.branch || "Unknown").trim() || "Unknown";
+      const key = normalizeKey(label);
+      if (!map.has(key)) {
+        map.set(key, { key, branch: label, total: 0 });
+      }
+      const row = map.get(key);
+      row.total += 1;
+    });
+    return Array.from(map.values()).sort((a, b) => b.total - a.total);
+  }, [applyFilters, filterSourceRows, rows, summaryRows]);
 
   return (
     <div>
@@ -1132,6 +1265,7 @@ export default function Bookings() {
             setFormModal({ open: true });
             if (!branchOptions.length || !executiveOptions.length) loadDropdowns();
           }}>Booking Form</Button>
+          <BookingHistoryButton webhookUrl={GAS_URL_STATIC} />
           <Tag color="blue">Total: {total}</Tag>
           <Tag color="geekblue">Showing: {USE_SERVER_PAG ? visibleRows.length : (renderMode==='loadMore' ? visibleRows.length : filtered.length)}{statusFilter !== 'all' ? ` (status: ${statusFilter})` : ''}</Tag>
           {!USE_SERVER_PAG && (
@@ -1150,6 +1284,44 @@ export default function Bookings() {
           }}>Refresh</Button>
         </Space>
       </div>
+
+      <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
+        {summaryLoading ? (
+          <Col xs={24}>
+            <Tag color="blue">Loading branch totals…</Tag>
+          </Col>
+        ) : null}
+        {branchSummary.map((b) => (
+          <Col key={b.key} xs={12} sm={8} md={6} lg={4} xl={3}>
+            <Card size="small" bodyStyle={{ padding: "6px 8px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{
+                  fontWeight: 600,
+                  fontSize: 12,
+                  lineHeight: "16px",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  flex: 1,
+                }}>
+                  {b.branch}
+                </span>
+                <span style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  lineHeight: "16px",
+                  padding: "0 6px",
+                  borderRadius: 10,
+                  background: "#eef2ff",
+                  color: "#1d4ed8",
+                }}>
+                  {b.total}
+                </span>
+              </div>
+            </Card>
+          </Col>
+        ))}
+      </Row>
 
       <Table
         dataSource={visibleRows}

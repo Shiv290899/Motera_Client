@@ -4,6 +4,7 @@ import useDebouncedValue from "../hooks/useDebouncedValue";
 // Sheet-only remarks; no backend remarks API
 import dayjs from "dayjs";
 import { saveJobcardViaWebhook } from "../apiCalls/forms";
+import { resolveUnifiedGasUrl } from '../utils/ownerConfig';
 import { useNavigate } from "react-router-dom";
 import { exportToCsv } from "../utils/csvExport";
 import { normalizeKey, uniqCaseInsensitive, toKeySet } from "../utils/caseInsensitive";
@@ -11,8 +12,9 @@ import { handleSmartPrint } from "../utils/printUtils";
 import PostServiceSheet from "./PostServiceSheet";
 
 // GAS endpoints (module-level) so both list + remark share same URL/secret
-const DEFAULT_JC_URL = "https://script.google.com/macros/s/AKfycbw7DzKCy3wZeeRBEM5XKIu6w0gt_2ouCaSkpaKv0UkjkQThCtVoRciOkkYT8sNViQuEaw/exec";
-const GAS_URL = import.meta.env.VITE_JOBCARD_GAS_URL || DEFAULT_JC_URL;
+const DEFAULT_JC_URL = "https://script.google.com/macros/s/AKfycbz_DoNoD0XTx3RNMOSZfypbMqWVN4yTy3ct96aE4LhJ9yb_YvKr0GRbO_GA3Fgkwptb/exec?module=jobcard";
+const getJobcardGasUrl = () =>
+  resolveUnifiedGasUrl('jobcard', import.meta.env.VITE_JOBCARD_GAS_URL || DEFAULT_JC_URL);
 const GAS_SECRET = import.meta.env.VITE_JOBCARD_GAS_SECRET || '';
 
 const { Text } = Typography;
@@ -23,6 +25,7 @@ const HEAD = {
   name: ["Customer Name", "Customer", "Name", "Customer_Name"],
   mobile: ["Mobile", "Phone", "Mobile Number"],
   branch: ["Branch"],
+  company: ["Company", "Company Name"],
   executive: ["Executive"],
   jcNo: ["JC No.", "JC No", "Job Card No", "JobCard No", "JCNumber"],
   regNo: ["Vehicle No", "Vehicle_No", "Registration Number", "RegNo", "Reg No"],
@@ -35,8 +38,32 @@ const HEAD = {
 };
 
 const pick = (obj, aliases) => String(aliases.map((k) => obj?.[k] ?? "").find((v) => v !== "") || "").trim();
+const unwrapWebhookBody = (input) => {
+  let cur = input;
+  for (let i = 0; i < 4; i += 1) {
+    if (!cur || typeof cur !== "object" || Array.isArray(cur)) break;
+    const next = cur.data;
+    if (next && typeof next === "object" && !Array.isArray(next)) {
+      cur = next;
+      continue;
+    }
+    break;
+  }
+  return cur && typeof cur === "object" ? cur : {};
+};
+
+const normalizeWebhookResult = (resp) => {
+  const root = resp?.data || resp || {};
+  const body = unwrapWebhookBody(root);
+  const rows = Array.isArray(body?.data) ? body.data : (Array.isArray(body?.rows) ? body.rows : []);
+  const totalCandidates = [body?.total, body?.count, body?.totalRows, body?.totalCount, root?.total, root?.count];
+  const total = totalCandidates.find((v) => Number.isFinite(Number(v)));
+  const ok = Boolean(body?.ok || body?.success || root?.ok || root?.success || Array.isArray(body?.data) || Array.isArray(body?.rows));
+  return { ok, rows, total: total === undefined ? null : Number(total) };
+};
 
 export default function Jobcards() {
+  const GAS_URL = getJobcardGasUrl();
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
   const navigate = useNavigate();
@@ -48,15 +75,15 @@ export default function Jobcards() {
   const [statusFilter, setStatusFilter] = useState("all"); // pending | completed | all
   const [q, setQ] = useState("");
   const debouncedQ = useDebouncedValue(q, 300);
-  const [dateRange, setDateRange] = useState(null); // [dayjs, dayjs]
+  const [dateRange, setDateRange] = useState(() => [dayjs().startOf('month'), dayjs()]); // [dayjs, dayjs]
   const [quickKey, setQuickKey] = useState(null); // today | yesterday | null
   const [userRole, setUserRole] = useState("");
   const [allowedBranches, setAllowedBranches] = useState([]);
   // Controlled pagination
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(25);
   const [renderMode, setRenderMode] = useState('pagination');
-  const [loadedCount, setLoadedCount] = useState(10);
+  const [loadedCount, setLoadedCount] = useState(25);
   const [totalCount, setTotalCount] = useState(0);
   // Default to server pagination enabled unless explicitly disabled by env
   const USE_SERVER_PAG = String((import.meta.env.VITE_USE_SERVER_PAGINATION ?? 'true')).toLowerCase() === 'true';
@@ -126,7 +153,7 @@ export default function Jobcards() {
     let payload = null;
     try { payload = typeof payloadRaw === 'object' ? payloadRaw : JSON.parse(String(payloadRaw || '{}')); } catch { payload = null; }
     const fv = (payload && payload.formValues) ? payload.formValues : {};
-    const company = fv.company || '';
+    const company = fv.company || payload?.company || pick(obj, HEAD.company);
     const model = fv.model || pick(obj, HEAD.model);
     const regNo = fv.regNo || pick(obj, HEAD.regNo);
     const serviceAmount = (() => {
@@ -152,10 +179,19 @@ export default function Jobcards() {
     const remarkTextRaw = payload?.remark?.text || obj?.RemarkText || obj?.['Remark Text'] || '';
     const remarkLevelNorm = String(remarkLevelRaw || '').toLowerCase();
     const serviceType = fv.serviceType || fv.service || pick(obj, HEAD.serviceType);
+    const savedAt =
+      payload?.savedAt ||
+      payload?.createdAt ||
+      payload?.ts ||
+      payload?.timestamp ||
+      fv?.savedAt ||
+      fv?.createdAt ||
+      fv?.timestamp ||
+      pick(obj, HEAD.ts);
     return {
       key: idx,
-      ts: pick(obj, HEAD.ts),
-      tsMs: parseTsMs(pick(obj, HEAD.ts)),
+      ts: savedAt,
+      tsMs: parseTsMs(savedAt),
       name: fv.name || pick(obj, HEAD.name),
       mobile: fv.mobile || pick(obj, HEAD.mobile),
       branch: fv.branch || pick(obj, HEAD.branch),
@@ -268,8 +304,8 @@ export default function Jobcards() {
           const base = { action: 'search', mode: 'mobile', query: mobile };
           const payloadReq = GAS_SECRET ? { ...base, secret: GAS_SECRET } : base;
           const resp = await saveJobcardViaWebhook({ webhookUrl: GAS_URL, method: 'GET', payload: payloadReq });
-          const js = resp?.data || resp;
-          const rows = Array.isArray(js?.rows) ? js.rows : (Array.isArray(js?.data) ? js.data : []);
+          const parsed = normalizeWebhookResult(resp);
+          const rows = parsed.rows;
           if (rows.length) {
             let target = rows[0];
             if (row.jcNo) {
@@ -354,24 +390,24 @@ export default function Jobcards() {
           method: 'GET',
           payload,
         });
-        const js = resp?.data || resp;
-        if (!js || (!js.ok && !js.success)) throw new Error('Invalid response');
-        const dataArr = Array.isArray(js.data) ? js.data : (Array.isArray(js.rows) ? js.rows : []);
-        const data = dataArr.map((o, idx) => mapJobRow(o, idx));
+        const parsed = normalizeWebhookResult(resp);
+        if (!parsed.ok) throw new Error('Invalid response');
+        const data = parsed.rows.map((o, idx) => mapJobRow(o, idx));
         const filteredRows = data.filter((r)=>r.jcNo || r.name || r.mobile);
+        const sortedRows = filteredRows.slice().sort((a, b) => (b.tsMs || 0) - (a.tsMs || 0));
         if (!cancelled) {
-          setRows(filteredRows);
-          const nextTotal = typeof js.total === 'number' ? js.total : filteredRows.length;
+          setRows(sortedRows);
+          const nextTotal = typeof parsed.total === 'number' ? parsed.total : sortedRows.length;
           setTotalCount(nextTotal);
           const map = {};
-          filteredRows.forEach(rr => {
+          sortedRows.forEach(rr => {
             if (!rr.jcNo) return;
             const lvl = (typeof rr._remarkLevel !== 'undefined' ? rr._remarkLevel : rr.remarkLevel) ?? String(rr.RemarkLevel || '').toLowerCase();
             const txt = (typeof rr._remarkText !== 'undefined' ? rr._remarkText : rr.remarkText) ?? rr.RemarkText ?? '';
             map[rr.jcNo] = { level: lvl || '', text: txt || '' };
           });
           setRemarksMap(map);
-          try { localStorage.setItem(cacheKey, JSON.stringify({ at: Date.now(), rows: filteredRows, total: nextTotal })); } catch {
+          try { localStorage.setItem(cacheKey, JSON.stringify({ at: Date.now(), rows: sortedRows, total: nextTotal })); } catch {
             //skdhj
           }
         }
@@ -429,7 +465,10 @@ export default function Jobcards() {
     return scoped.slice().sort((a,b)=> (b.tsMs||0) - (a.tsMs||0));
   }, [allowedBranches, branchFilter, dateRange, debouncedQ, serviceFilter, statusFilter, userRole]);
 
-  const filtered = useMemo(() => applyFilters(rows), [applyFilters, rows]);
+  const filtered = useMemo(
+    () => (USE_SERVER_PAG ? rows : applyFilters(rows)),
+    [USE_SERVER_PAG, applyFilters, rows]
+  );
 
   // Reset pagination when filters/search/date change
   useEffect(() => {
@@ -454,9 +493,8 @@ export default function Jobcards() {
     }
     const payload = GAS_SECRET ? { ...base, ...filters, secret: GAS_SECRET } : { ...base, ...filters };
     const resp = await saveJobcardViaWebhook({ webhookUrl: GAS_URL, method: 'GET', payload });
-    const js = resp?.data || resp;
-    const dataArr = Array.isArray(js?.data) ? js.data : (Array.isArray(js?.rows) ? js.rows : []);
-    return dataArr.map((o, idx) => mapJobRow(o, idx)).filter((r)=>r.jcNo || r.name || r.mobile);
+    const parsed = normalizeWebhookResult(resp);
+    return parsed.rows.map((o, idx) => mapJobRow(o, idx)).filter((r)=>r.jcNo || r.name || r.mobile);
   }, [USE_SERVER_PAG, GAS_URL, GAS_SECRET, branchFilter, dateRange, debouncedQ, mapJobRow, rows, serviceFilter, statusFilter]);
 
   const handleExportCsv = async () => {
@@ -464,7 +502,7 @@ export default function Jobcards() {
     message.loading({ key: msgKey, content: 'Preparing CSV…', duration: 0 });
     try {
       const baseRows = USE_SERVER_PAG ? await loadExportRows() : rows;
-      const scoped = applyFilters(baseRows);
+      const scoped = USE_SERVER_PAG ? baseRows : applyFilters(baseRows);
       if (!scoped.length) {
         message.info({ key: msgKey, content: 'No rows to export for current filters' });
         return;
@@ -520,10 +558,9 @@ export default function Jobcards() {
           ? { action: 'list', page: 1, pageSize: 5000, secret: GAS_SECRET }
           : { action: 'list', page: 1, pageSize: 5000 };
         const resp = await saveJobcardViaWebhook({ webhookUrl: GAS_URL, method: 'GET', payload });
-        const js = resp?.data || resp;
-        if (!js || (!js.ok && !js.success)) return;
-        const dataArr = Array.isArray(js.data) ? js.data : (Array.isArray(js.rows) ? js.rows : []);
-        const mapped = dataArr.map((o, idx) => mapJobRow(o, idx));
+        const parsed = normalizeWebhookResult(resp);
+        if (!parsed.ok) return;
+        const mapped = parsed.rows.map((o, idx) => mapJobRow(o, idx));
         if (!cancelled) setFilterSourceRows(mapped);
       } catch { /* ignore */ }
     };
@@ -531,14 +568,12 @@ export default function Jobcards() {
     return () => { cancelled = true; };
   }, []);
 
-  const stackStyle = { display: 'flex', flexDirection: 'column', gap: 2, lineHeight: 1.2 };
+  const stackStyle = { display: 'flex', flexDirection: 'column', gap: 4, lineHeight: 1.25 };
   const lineStyle = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
-  const statusColor = (v) => {
-    const s = String(v || '').toLowerCase();
-    if (s === 'completed') return 'green';
-    if (s === 'pending') return 'orange';
-    return 'default';
-  };
+  const titleLineStyle = { ...lineStyle, fontSize: isMobile ? 15 : 16, fontWeight: 700, color: '#0f172a' };
+  const subLineStyle = { ...lineStyle, fontSize: isMobile ? 12 : 13, color: '#475569' };
+  const mobileLineStyle = { ...lineStyle, fontSize: isMobile ? 14 : 15, fontWeight: 600, color: '#1e293b', letterSpacing: 0.2 };
+  const metaLineStyle = { ...lineStyle, fontSize: isMobile ? 11 : 12, color: '#64748b' };
   const statusLabel = (v) => {
     const s = String(v || '').toLowerCase();
     if (s === 'completed') return 'Completed';
@@ -552,16 +587,16 @@ export default function Jobcards() {
   };
 
   const columns = [
-    { title: "Time / Branch", key: "timeBranch", width: 90, render: (_, r) => (
+    { title: "Time / Branch", key: "timeBranch", width: 120, render: (_, r) => (
       <div style={stackStyle}>
-        <div style={lineStyle}>{formatTs(r.ts)}</div>
-        <div style={lineStyle}><Text type="secondary">{r.branch || '—'}</Text></div>
+        <div style={subLineStyle}>{formatTs(r.ts)}</div>
+        <div style={metaLineStyle}><Text type="secondary">{r.branch || '—'}</Text></div>
       </div>
     ) },
-    { title: "Customer / Mobile", key: "customerMobile", width: 100, render: (_, r) => (
+    { title: "Customer / Mobile", key: "customerMobile", width: 170, render: (_, r) => (
       <div style={stackStyle}>
-        <div style={lineStyle}>{r.name || '—'}</div>
-        <div style={lineStyle}><Text type="secondary">{r.mobile || '—'}</Text></div>
+        <div style={titleLineStyle}>{r.name || '—'}</div>
+        <div style={mobileLineStyle}>{r.mobile || '—'}</div>
       </div>
     ) },
     { title: "Service / Status", key: "serviceStatus", width: 200, render: (_, r) => {
@@ -570,16 +605,36 @@ export default function Jobcards() {
         const serviceType = String(r.serviceType || '').trim() || '—';
         const amount = String(r.amount || '').trim() || '—';
         const paymentMode = String(r.paymentMode || '').trim();
-        const line1 = `${company} || ${model} || ${serviceType} || ${amount} || ${paymentMode ? paymentMode.toUpperCase() : '—'}`;
         const exec = String(r.executive || '').trim() || '—';
         const reg = String(r.regNo || '').trim() || '—';
+        const statusLc = String(r.status || '').toLowerCase();
+        const statusNode =
+          statusLc === 'pending' || statusLc === 'completed' ? (
+            <Tag
+              color={statusLc === 'pending' ? 'red' : 'green'}
+              style={{ marginInlineEnd: 0, borderRadius: 999, fontWeight: 700, paddingInline: 10 }}
+            >
+              {statusLabel(r.status)}
+            </Tag>
+          ) : (
+            <span style={{ ...metaLineStyle, fontWeight: 600 }}>{statusLabel(r.status)}</span>
+          );
         return (
           <div style={stackStyle}>
-            <div style={lineStyle}>{line1}</div>
+            <div style={{ ...titleLineStyle, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', whiteSpace: 'normal' }}>
+              <span style={{ fontWeight: 800 }}>{company}</span>
+              <span style={{ color: '#334155' }}>{model}</span>
+              <span style={{ color: '#475569' }}>{serviceType}</span>
+              <span style={{ color: '#0f172a' }}>₹ {amount}</span>
+              <span style={{ color: '#64748b' }}>{paymentMode ? paymentMode.toUpperCase() : '—'}</span>
+            </div>
             <div style={lineStyle}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                <Tag color={statusColor(r.status)}>{statusLabel(r.status)}</Tag>
-                <span>{`|| ${exec} || ${reg}`}</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                {statusNode}
+                <span style={metaLineStyle}>||</span>
+                <span style={metaLineStyle}>{exec}</span>
+                <span style={metaLineStyle}>||</span>
+                <span style={{ ...metaLineStyle, fontWeight: 600 }}>{reg}</span>
               </span>
             </div>
           </div>
@@ -687,32 +742,42 @@ export default function Jobcards() {
         </Space>
       </div>
 
-      <Table
-        dataSource={visibleRows}
-        columns={columns}
-        loading={loading && !hasCache}
-        size="small"
-        className="compact-table"
-        tableLayout={isMobile ? "auto" : "fixed"}
-        pagination={USE_SERVER_PAG ? {
-          current: page,
-          pageSize,
-          total,
-          showSizeChanger: true,
-          pageSizeOptions: ['10','25','50','100'],
-          onChange: (p, ps) => { setPage(p); if (ps !== pageSize) setPageSize(ps); },
-          showTotal: (t, range) => `${range[0]}-${range[1]} of ${t}`,
-        } : (renderMode==='pagination' ? {
-          current: page,
-          pageSize,
-          showSizeChanger: true,
-          pageSizeOptions: ['10','25','50','100'],
-          onChange: (p, ps) => { setPage(p); if (ps !== pageSize) setPageSize(ps); },
-          showTotal: (total, range) => `${range[0]}-${range[1]} of ${total}`,
-        } : false)}
-        rowKey={(r) => `${r.jcNo}-${r.mobile}-${r.ts}-${r.key}`}
-        scroll={isMobile ? { x: 'max-content', y: tableHeight } : { y: tableHeight }}
-      />
+      <div
+        style={{
+          border: '1px solid #e2e8f0',
+          borderRadius: 14,
+          background: 'linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)',
+          boxShadow: '0 10px 24px rgba(15, 23, 42, 0.06)',
+          overflow: 'hidden',
+        }}
+      >
+        <Table
+          dataSource={visibleRows}
+          columns={columns}
+          loading={loading && !hasCache}
+          size="middle"
+          className="compact-table"
+          tableLayout={isMobile ? "auto" : "fixed"}
+          pagination={USE_SERVER_PAG ? {
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            pageSizeOptions: ['10','25','50','100'],
+            onChange: (p, ps) => { setPage(p); if (ps !== pageSize) setPageSize(ps); },
+            showTotal: (t, range) => `${range[0]}-${range[1]} of ${t}`,
+          } : (renderMode==='pagination' ? {
+            current: page,
+            pageSize,
+            showSizeChanger: true,
+            pageSizeOptions: ['10','25','50','100'],
+            onChange: (p, ps) => { setPage(p); if (ps !== pageSize) setPageSize(ps); },
+            showTotal: (total, range) => `${range[0]}-${range[1]} of ${total}`,
+          } : false)}
+          rowKey={(r) => `${r.jcNo}-${r.mobile}-${r.ts}-${r.key}`}
+          scroll={isMobile ? { x: 'max-content', y: tableHeight } : { y: tableHeight }}
+        />
+      </div>
 
       {!USE_SERVER_PAG && renderMode==='loadMore' && visibleRows.length < filtered.length ? (
         <div style={{ display:'flex', justifyContent:'center', padding: 8 }}>

@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState, useCallback } from "react";
-import { Table, Grid, Space, Button, Select, Input, Tag, Typography, message, DatePicker, Modal, Tooltip } from "antd";
+import { Table, Grid, Space, Button, Select, Input, Tag, Typography, message, DatePicker, Modal, Tooltip, Popover, Row, Col, Card } from "antd";
+import { PhoneOutlined } from "@ant-design/icons";
 import useDebouncedValue from "../hooks/useDebouncedValue";
 import { saveBookingViaWebhook } from "../apiCalls/forms";
+import { getOwnerConfig, resolveUnifiedGasUrl } from '../utils/ownerConfig';
 import dayjs from "dayjs";
 import { useNavigate } from "react-router-dom";
 import { exportToCsv } from "../utils/csvExport";
@@ -28,6 +30,29 @@ const HEAD = {
 };
 
 const pick = (obj, aliases) => String(aliases.map((k) => obj[k] ?? "").find((v) => v !== "") || "").trim();
+const unwrapWebhookBody = (input) => {
+  let cur = input;
+  for (let i = 0; i < 4; i += 1) {
+    if (!cur || typeof cur !== "object" || Array.isArray(cur)) break;
+    const next = cur.data;
+    if (next && typeof next === "object" && !Array.isArray(next)) {
+      cur = next;
+      continue;
+    }
+    break;
+  }
+  return cur && typeof cur === "object" ? cur : {};
+};
+
+const normalizeWebhookResult = (resp) => {
+  const root = resp?.data || resp || {};
+  const body = unwrapWebhookBody(root);
+  const rows = Array.isArray(body?.data) ? body.data : (Array.isArray(body?.rows) ? body.rows : []);
+  const totalCandidates = [body?.total, body?.count, body?.totalRows, body?.totalCount, root?.total, root?.count];
+  const total = totalCandidates.find((v) => Number.isFinite(Number(v)));
+  const ok = Boolean(body?.ok || body?.success || root?.ok || root?.success || Array.isArray(body?.data) || Array.isArray(body?.rows));
+  return { ok, rows, total: total === undefined ? null : Number(total) };
+};
 
 const rupeeFormatter =
   typeof Intl !== 'undefined'
@@ -41,23 +66,25 @@ const formatCurrency = (value) => {
   return `${num < 0 ? '-' : ''}₹${formatted}`;
 };
 
-const QUOT_RATE_LOW = 9;
-const QUOT_RATE_HIGH = 11;
+const QUOT_DEFAULT_FLAT_RATE = 11;
 const QUOT_PROCESSING_FEE = 8000;
-
-const rateForQuotation = (price, dp) => {
-  const p = Number(price || 0);
-  const d = Number(dp || 0);
-  const dpPct = p > 0 ? d / p : 0;
-  return dpPct >= 0.3 ? QUOT_RATE_LOW : QUOT_RATE_HIGH;
-};
+const ownerCfgForQuotation = getOwnerConfig() || {};
+const QUOT_FLAT_RATE = (() => {
+  const v = Number(ownerCfgForQuotation?.flatInterestRate);
+  return Number.isFinite(v) && v >= 0 ? v : QUOT_DEFAULT_FLAT_RATE;
+})();
+const QUOT_EFFECTIVE_PROCESSING_FEE = (() => {
+  const v = Number(ownerCfgForQuotation?.processingFee);
+  return Number.isFinite(v) && v >= 0 ? v : QUOT_PROCESSING_FEE;
+})();
 
 const monthlyForQuotation = (price, dp, months) => {
-  const principalBase = Math.max(Number(price || 0) - Number(dp || 0), 0);
-  const principal = principalBase + QUOT_PROCESSING_FEE;
+  const priceNum = Math.max(Number(price || 0), 0);
+  const dpNum = Math.max(Number(dp || 0), 0);
+  const netPrice = Math.max(priceNum - dpNum, 0);
+  const principal = netPrice + Math.max(Number(QUOT_EFFECTIVE_PROCESSING_FEE || 0), 0);
   const years = months / 12;
-  const rate = rateForQuotation(price, dp);
-  const totalInterest = principal * (rate / 100) * years;
+  const totalInterest = principal * (QUOT_FLAT_RATE / 100) * years;
   const total = principal + totalInterest;
   return months > 0 ? total / months : 0;
 };
@@ -69,6 +96,11 @@ const buildEmiText = (price, dp, emiSet) => {
   if (!Number(price || 0)) return "";
   const parts = tenures.map((mo) => `${mo}:${formatCurrency(monthlyForQuotation(price, dp, mo))}`);
   return parts.length ? `EMI(${emiSet || "12"}): ${parts.join(" | ")}` : "";
+};
+
+const isFinanceMode = (mode) => {
+  const normalized = String(mode || "").trim().toLowerCase();
+  return ["loan", "nohp", "hp", "finance"].includes(normalized);
 };
 
 const buildQuotationOfferingsText = ({ payload, baseOfferings }) => {
@@ -105,6 +137,98 @@ const buildQuotationOfferingsText = ({ payload, baseOfferings }) => {
   return [remarks, ...offerings].filter(Boolean).join(" • ");
 };
 
+const uniqueNonEmpty = (list = []) =>
+  Array.from(
+    new Set(
+      (Array.isArray(list) ? list : [])
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+    )
+  );
+
+const buildQuotationOfferingDetails = ({ payload, baseOfferings, fallbackText, mode }) => {
+  const remarks = String(baseOfferings || "").trim();
+  const vehicles = [];
+  const financeMode = isFinanceMode(mode || payload?.mode || payload?.purchaseMode || payload?.paymentType);
+  if (payload && typeof payload === "object") {
+    const fv = payload.formValues || {};
+    const globalFittings = uniqueNonEmpty(payload.fittings);
+    const addVehicle = ({
+      label,
+      company,
+      model,
+      variant,
+      priceRaw,
+      dpRaw,
+      emiSetRaw,
+      fittingsRaw,
+    }) => {
+      const cleanCompany = String(company || "").trim();
+      const cleanModel = String(model || "").trim();
+      const cleanVariant = String(variant || "").trim();
+      const price = Number(priceRaw || 0);
+      const dp = Number(dpRaw || 0);
+      const fittings = uniqueNonEmpty(fittingsRaw || globalFittings);
+      const title = [cleanCompany, cleanModel, cleanVariant].filter(Boolean).join(" ");
+      const hasData = Boolean(title || fittings.length || price || dp);
+      if (!hasData) return;
+      vehicles.push({
+        label,
+        title: title || "Vehicle details not available",
+        priceText: price ? formatCurrency(price) : "—",
+        dpText: dp ? formatCurrency(dp) : "—",
+        emiText: price ? buildEmiText(price, dp, emiSetRaw || payload.emiSet || "12") : "",
+        fittings,
+        financeMode,
+      });
+    };
+
+    addVehicle({
+      label: "Vehicle 1",
+      company: fv.company ?? payload.company,
+      model: fv.bikeModel ?? fv.model ?? payload.model,
+      variant: fv.variant ?? payload.variant,
+      priceRaw: fv.onRoadPrice ?? payload.onRoadPrice,
+      dpRaw: fv.downPayment ?? payload.downPayment,
+      emiSetRaw: payload.emiSet,
+      fittingsRaw: payload.fittings,
+    });
+    const extra = Array.isArray(payload.extraVehicles) ? payload.extraVehicles : [];
+    extra.forEach((ev, idx) => {
+      addVehicle({
+        label: `Vehicle ${idx + 2}`,
+        company: ev.company,
+        model: ev.model,
+        variant: ev.variant,
+        priceRaw: ev.onRoadPrice,
+        dpRaw: ev.downPayment,
+        emiSetRaw: ev.emiSet || payload.emiSet,
+        fittingsRaw: ev.fittings,
+      });
+    });
+  }
+
+  if (!vehicles.length && fallbackText) {
+    const parts = String(fallbackText)
+      .split("•")
+      .map((x) => x.trim())
+      .filter(Boolean);
+    parts.forEach((part) => {
+      const m = part.match(/^V(\d+)\s*:\s*(.+)$/i);
+      if (!m) return;
+      vehicles.push({
+        label: `Vehicle ${m[1]}`,
+        title: m[2],
+        priceText: "—",
+        dpText: "—",
+        emiText: "",
+        fittings: [],
+      });
+    });
+  }
+
+  return { remarks, vehicles };
+};
 export default function Quotations() {
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
@@ -117,15 +241,15 @@ export default function Quotations() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [q, setQ] = useState("");
   const debouncedQ = useDebouncedValue(q, 300);
-  const [dateRange, setDateRange] = useState(null); // [dayjs, dayjs]
+  const [dateRange, setDateRange] = useState(() => [dayjs().startOf('month'), dayjs()]); // [dayjs, dayjs]
   const [quickKey, setQuickKey] = useState(null); // today | yesterday | null
   const [userRole, setUserRole] = useState("");
   const [allowedBranches, setAllowedBranches] = useState([]);
   // Controlled pagination
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(25);
   const [renderMode, setRenderMode] = useState('pagination');
-  const [loadedCount, setLoadedCount] = useState(10);
+  const [loadedCount, setLoadedCount] = useState(25);
   const [totalCount, setTotalCount] = useState(0);
   // Default to server pagination so no env is required
   const USE_SERVER_PAG = String((import.meta.env.VITE_USE_SERVER_PAGINATION ?? 'true')).toLowerCase() === 'true';
@@ -166,8 +290,8 @@ export default function Quotations() {
 
   const gasConfig = useMemo(() => {
     const DEFAULT_QUOT_URL =
-      "https://script.google.com/macros/s/AKfycbxXtfRVEFeaKu10ijzfQdOVlgkZWyH1q1t4zS3PHTX9rQQ7ztRJdpFV5svk98eUs3UXuw/exec";
-    const GAS_URL = import.meta.env.VITE_QUOTATION_GAS_URL || DEFAULT_QUOT_URL;
+      "https://script.google.com/macros/s/AKfycbz_DoNoD0XTx3RNMOSZfypbMqWVN4yTy3ct96aE4LhJ9yb_YvKr0GRbO_GA3Fgkwptb/exec?module=quotation";
+    const GAS_URL = resolveUnifiedGasUrl('quotation', import.meta.env.VITE_QUOTATION_GAS_URL || DEFAULT_QUOT_URL);
     const SECRET = import.meta.env.VITE_QUOTATION_GAS_SECRET || '';
     return { GAS_URL, SECRET };
   }, []);
@@ -217,6 +341,8 @@ export default function Quotations() {
       variant,
       price,
       offerings,
+      offeringsBase,
+      payload,
       mode: mode || (payload && payload.mode) || '',
       brand,
       status,
@@ -251,10 +377,9 @@ export default function Quotations() {
         if (!GAS_URL) return;
         const payload = SECRET ? { action: 'list', page: 1, pageSize: 5000, secret: SECRET } : { action: 'list', page: 1, pageSize: 5000 };
         const resp = await saveBookingViaWebhook({ webhookUrl: GAS_URL, method: 'GET', payload });
-        const js = resp?.data || resp;
-        if (!js || (!js.ok && !js.success)) return;
-        const dataArr = Array.isArray(js.data) ? js.data : (Array.isArray(js.rows) ? js.rows : []);
-        const mapped = dataArr.map((o, idx) => mapRow(o, idx));
+        const parsed = normalizeWebhookResult(resp);
+        if (!parsed.ok) return;
+        const mapped = parsed.rows.map((o, idx) => mapRow(o, idx));
         if (!cancelled) setFilterSourceRows(mapped);
       } catch {
         // ignore filter fetch failure
@@ -295,14 +420,13 @@ export default function Quotations() {
           method: 'GET',
           payload,
         });
-        const js = resp?.data || resp;
-        if (!js || (!js.ok && !js.success)) throw new Error('Invalid response');
-        const dataArr = Array.isArray(js.data) ? js.data : (Array.isArray(js.rows) ? js.rows : []);
-        const data = dataArr.map((o, idx) => mapRow(o, idx));
+        const parsed = normalizeWebhookResult(resp);
+        if (!parsed.ok) throw new Error('Invalid response');
+        const data = parsed.rows.map((o, idx) => mapRow(o, idx));
         const filteredRows = data.filter((r)=>r.name || r.mobile || r.serialNo);
         if (!cancelled) {
           setRows(filteredRows);
-          const nextTotal = typeof js.total === 'number' ? js.total : filteredRows.length;
+          const nextTotal = typeof parsed.total === 'number' ? parsed.total : filteredRows.length;
           setTotalCount(nextTotal);
           const map = {};
           filteredRows.forEach(rr => { if (rr.serialNo) map[rr.serialNo] = { level: rr._remarkLevel || undefined, text: rr._remarkText || '' }; });
@@ -399,9 +523,8 @@ export default function Quotations() {
     }
     const payload = SECRET ? { ...base, ...filters, secret: SECRET } : { ...base, ...filters };
     const resp = await saveBookingViaWebhook({ webhookUrl: GAS_URL, method: 'GET', payload });
-    const js = resp?.data || resp;
-    const dataArr = Array.isArray(js?.data) ? js.data : (Array.isArray(js?.rows) ? js.rows : []);
-    return dataArr.map((o, idx) => mapRow(o, idx)).filter((r)=>r.name || r.mobile || r.serialNo);
+    const parsed = normalizeWebhookResult(resp);
+    return parsed.rows.map((o, idx) => mapRow(o, idx)).filter((r)=>r.name || r.mobile || r.serialNo);
   }, [USE_SERVER_PAG, gasConfig, branchFilter, dateRange, debouncedQ, mapRow, modeFilter, rows, statusFilter]);
 
   const handleExportCsv = async () => {
@@ -477,6 +600,15 @@ export default function Quotations() {
     const text = String(note || '').trim();
     return text ? `${ts} - ${text}` : ts;
   };
+  const openCallDialer = (mobile) => {
+    const digits = String(mobile || '').replace(/\D/g, '');
+    const local = digits.length >= 10 ? digits.slice(-10) : '';
+    if (!local) {
+      message.warning('Valid mobile number not available for this quotation.');
+      return;
+    }
+    window.location.href = `tel:${local}`;
+  };
 
   const stackStyle = { display: 'flex', flexDirection: 'column', gap: 2, lineHeight: 1 };
   const lineStyle = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
@@ -513,15 +645,48 @@ export default function Quotations() {
     ) },
     
     { title: "Offerings", key: "offerings", width: 280, render: (_, r) => {
-      const offerings = String(r.offerings || '').trim();
+      const details = buildQuotationOfferingDetails({
+        payload: r.payload,
+        baseOfferings: r.offeringsBase,
+        fallbackText: r.offerings,
+        mode: r.mode,
+      });
+      const count = details.vehicles.length;
+      const popoverContent = (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 360, maxWidth: 520 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#1d4ed8" }}>
+            {count ? `${count} Vehicle Offer${count > 1 ? "s" : ""}` : "Offer Details"}
+          </div>
+          {details.vehicles.length ? details.vehicles.map((v) => (
+            <div key={v.label} style={{ border: "1px solid #dbeafe", borderRadius: 10, padding: 8, background: "#f8fbff" }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: "#1e3a8a", textTransform: "uppercase", marginBottom: 4 }}>{v.label}</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#111827", marginBottom: 4 }}>{v.title}</div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, color: "#1f2937" }}>
+                <span><b>Price</b>: {v.priceText}</span>
+                {v.financeMode ? <span><b>DP</b>: {v.dpText}</span> : null}
+              </div>
+              {v.financeMode && v.emiText ? <div style={{ marginTop: 4, fontSize: 11, color: "#334155", lineHeight: 1.3 }}>{v.emiText}</div> : null}
+              {v.fittings.length ? <div style={{ marginTop: 4, fontSize: 11, color: "#334155", lineHeight: 1.3 }}><b>Fittings</b>: {v.fittings.join(", ")}</div> : null}
+            </div>
+          )) : (
+            <div style={{ fontSize: 12, color: "#64748b" }}>No vehicle-wise offer added.</div>
+          )}
+        </div>
+      );
       return (
         <div style={stackStyle}>
-          {offerings ? (
-            <Tooltip title={<span style={{ whiteSpace: 'pre-wrap' }}>{offerings}</span>} placement="topLeft">
-              <div style={offeringClamp}>{offerings}</div>
-            </Tooltip>
+           {count ? (
+            <Popover content={popoverContent} trigger={['hover', 'click']} placement="topLeft">
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {details.vehicles.map((v) => (
+                  <div key={v.label} style={{ ...lineStyle, fontSize: 10.5, color: "#1f2937" }}>
+                    <span style={{ fontWeight: 800, color: "#1d4ed8" }}>{v.label}:</span> {v.title}
+                  </div>
+                ))}
+              </div>
+            </Popover>
           ) : (
-            <div style={offeringClamp}></div>
+             <div style={offeringClamp}>No offering details</div>
           )}
         </div>
       );
@@ -531,7 +696,18 @@ export default function Quotations() {
       return (
         <div style={stackStyle}>
           <div style={lineStyle}>
-            <Tag color={statusColor(r.status)}>{statusLabel(r.status)}</Tag>
+            <Space size={6}>
+              <Tag color={statusColor(r.status)}>{statusLabel(r.status)}</Tag>
+              <Tooltip title="Call customer">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<PhoneOutlined />}
+                  aria-label={`Call ${r.mobile || 'customer'}`}
+                  onClick={() => openCallDialer(r.mobile)}
+                />
+              </Tooltip>
+            </Space>
           </div>
           {notes ? (
             <Tooltip title={<span style={{ whiteSpace: 'pre-wrap' }}>{notes}</span>} placement="topLeft">
@@ -543,21 +719,16 @@ export default function Quotations() {
         </div>
       );
     } },
-    { title: "Model / ORP / Mode / Executive", key: "vehicleMeta", width: 190, render: (_, r) => {
-        const model = String(r.model || '').trim();
-        const variant = String(r.variant || '').trim();
-        const modelVariant = model && variant ? `${model} || ${variant}` : (model || variant || '—');
-        const price = String(r.price || '').trim() || '—';
-        const mode = String(r.mode || '').trim();
+    { title: "Mode / Executive", key: "vehicleMeta", width: 120, render: (_, r) => {
+        const mode = String(r.mode || '').trim().toUpperCase();
         const exec = String(r.executive || '').trim();
         const metaLine = [
-          price,
-          mode ? mode.toUpperCase() : '—',
+          
           exec || '—',
         ].join(' || ');
         return (
           <div style={stackStyle}>
-            <div style={metaLineStyle}>{modelVariant}</div>
+            <div style={{ ...metaLineStyle, fontSize: 10, fontWeight: 700 }}>{mode || '—'}</div>
             <div style={metaLineStyle}>{metaLine}</div>
           </div>
         );
@@ -755,6 +926,6 @@ function parseTsMs(v) {
   return null;
 }
   // GAS endpoints (same as used for list)
-  const DEFAULT_QUOT_URL = "https://script.google.com/macros/s/AKfycbxXtfRVEFeaKu10ijzfQdOVlgkZWyH1q1t4zS3PHTX9rQQ7ztRJdpFV5svk98eUs3UXuw/exec";
-  const GAS_URL = import.meta.env.VITE_QUOTATION_GAS_URL || DEFAULT_QUOT_URL;
+  const DEFAULT_QUOT_URL = "https://script.google.com/macros/s/AKfycbz_DoNoD0XTx3RNMOSZfypbMqWVN4yTy3ct96aE4LhJ9yb_YvKr0GRbO_GA3Fgkwptb/exec?module=quotation";
+  const GAS_URL = resolveUnifiedGasUrl('quotation', import.meta.env.VITE_QUOTATION_GAS_URL || DEFAULT_QUOT_URL);
   const GAS_SECRET = import.meta.env.VITE_QUOTATION_GAS_SECRET || '';

@@ -91,3 +91,29 @@ export const ResetPassword = async ({ token, password }) => {
     throw error;
   }
 };
+
+// Update current owner profile (name/logo/webhook)
+export const UpdateOwnerProfile = async (payload) => {
+  try {
+    const token = localStorage.getItem('token');
+    const { data, status } = await axiosInstance.patch("/users/me", payload, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      validateStatus: () => true,
+    });
+    return { ...data, _status: status };
+  } catch (error) {
+    return { success: false, message: error?.message || "Update failed", _status: 0 };
+  }
+};
+
+// Create invite link for staff/mechanic/callboy
+export const CreateInviteLink = async (payload = {}) => {
+  try {
+    const { data, status } = await axiosInstance.post("/users/invite", payload, {
+      validateStatus: () => true,
+    });
+    return { ...data, _status: status };
+  } catch (error) {
+    return { success: false, message: error?.message || "Invite failed", _status: 0 };
+  }
+};

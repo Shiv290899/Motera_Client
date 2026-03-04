@@ -1,4 +1,5 @@
 import { axiosInstance } from ".";
+import { getTenantOwnerId } from "../utils/ownerConfig";
 
 export const listUsers = async (params = {}) => {
   const token = localStorage.getItem("token");
@@ -10,8 +11,9 @@ export const listUsers = async (params = {}) => {
 };
 
 export const listUsersPublic = async (params = {}) => {
+  const ownerId = getTenantOwnerId();
   const { data, status } = await axiosInstance.get("/users/public", {
-    params,
+    params: ownerId ? { ...params, ownerId } : params,
     validateStatus: () => true,
   });
   return { ...data, _status: status };

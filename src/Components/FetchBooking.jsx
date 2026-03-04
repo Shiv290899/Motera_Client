@@ -161,10 +161,22 @@ export default function FetchBooking({
     return p && typeof p === "object" ? p : {};
   };
 
-  const applyToForm = (payload) => {
+  const composeBookingSource = (row) => {
+    const payload = payloadFromRow(row);
+    const values = row && typeof row.values === "object" ? row.values : {};
+    return {
+      ...(row && typeof row === "object" ? row : {}),
+      ...values,
+      ...payload,
+      payload,
+      values,
+    };
+  };
+
+  const applyToForm = (rowLike) => {
     try {
-      const p = payloadFromRow(payload);
-      const { patch, metadata } = buildBookingFormPatch(p);
+      const source = composeBookingSource(rowLike);
+      const { patch, metadata } = buildBookingFormPatch(source);
       form.setFieldsValue(patch);
       if (patch.company) setSelectedCompany?.(patch.company);
       if (patch.bikeModel) setSelectedModel?.(patch.bikeModel);
@@ -234,14 +246,14 @@ export default function FetchBooking({
     setLoading(true);
     try {
       const rows = await fetchRows(qNorm, nextMode);
-      const items = rows.map((r) => ({ payload: payloadFromRow(r) }));
+      const items = rows.map((r) => ({ row: r }));
       if (!items.length) {
         if (!silent) showNotFoundModal(nextMode);
         setMatches([]);
         return;
       }
       if (items.length === 1) {
-        applyToForm(items[0].payload);
+        applyToForm(items[0].row);
         return;
       }
       setMatches(items.slice(0, 10));
@@ -274,20 +286,22 @@ export default function FetchBooking({
   }, [autoSearch?.mode, autoSearch?.query]);
 
   const renderItem = (item) => {
-    const p = payloadFromRow(item.payload);
+    const source = composeBookingSource(item.row);
+    const p = source.payload || {};
     const v = p.vehicle || {};
-    const labelVeh = [v.company, v.model, v.variant]
+    const labelVeh = [v.company || source.company, v.model || source.model, v.variant || source.variant]
       .filter(Boolean)
       .join(" ");
-    const mobile = tenDigits(p.mobileNumber || p.mobile || "");
-    const branch = p.branch || "-";
-    const created = p.ts
-      ? dayjs(p.ts).format("DD-MM-YYYY HH:mm")
+    const mobile = tenDigits(p.mobileNumber || p.mobile || source.mobileNumber || source.mobile || "");
+    const branch = p.branch || source.branch || "-";
+    const createdRaw = p.ts || source["Submitted At"] || source.Timestamp || source["SubmittedAt"];
+    const created = createdRaw
+      ? dayjs(createdRaw).format("DD-MM-YYYY HH:mm")
       : "-";
     return (
       <List.Item
         actions={[
-          <Button type="link" onClick={() => applyToForm(item.payload)}>
+          <Button type="link" onClick={() => applyToForm(item.row)}>
             Use
           </Button>,
         ]}
@@ -300,7 +314,7 @@ export default function FetchBooking({
           }}
         >
           <div>
-            <b>Name:</b> {p.customerName || p.name || "-"} &nbsp;
+            <b>Name:</b> {p.customerName || p.name || source.customerName || source.name || "-"} &nbsp;
             <b>Mobile:</b> {mobile || "-"}
           </div>
           <div>
@@ -314,7 +328,7 @@ export default function FetchBooking({
             }}
           >
             <b>Mode:</b>{" "}
-            {String(p.purchaseMode || p.purchaseType || "cash").toUpperCase()}{" "}
+            {String(p.purchaseMode || p.purchaseType || source.purchaseMode || source.purchaseType || "cash").toUpperCase()}{" "}
             &nbsp; <b>Date:</b> {created}
           </div>
         </div>

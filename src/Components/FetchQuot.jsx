@@ -10,6 +10,7 @@ import { Alert, Button, Modal, Input, List, Space, Spin, message } from "antd";
  * - EXECUTIVES
  * - setBrand, setMode, setVehicleType, setFittings, setDocsReq, setEmiSet,
  *   setDownPayment, setOnRoadPrice, setCompany, setModel, setVariant, setExtraVehicles
+ * - onPayloadMeta({ serialNo, savedAt, createdAt })
  * - buttonText, buttonProps
  */
 export default function FetchQuot({
@@ -31,6 +32,7 @@ export default function FetchQuot({
   setFollowUpEnabled,
   setFollowUpAt,
   setFollowUpNotes,
+  onPayloadMeta,
   autoApply,
   buttonText = "Fetch Details",
   buttonProps = {},
@@ -85,7 +87,7 @@ export default function FetchQuot({
     // Fallback minimal object when payload missing (very old rows)
     return {
       version: 0,
-      brand: "SHANTHA",
+      brand: "MOTERA",
       mode: "cash",
       vehicleType: "scooter",
       fittings: [],
@@ -115,10 +117,27 @@ export default function FetchQuot({
     };
   };
 
+  const pickTimingValue = (...vals) => {
+    for (const v of vals) {
+      if (v === null || typeof v === "undefined") continue;
+      const s = String(v).trim();
+      if (s) return s;
+    }
+    return "";
+  };
+
   // Convert a webhook row into a usable payload
   const payloadFromWebhook = (row) => {
     const pv = row && typeof row === 'object' ? row.payload : null;
     const values = row && typeof row === 'object' ? (row.values || {}) : {};
+    const firstNonEmpty = (...vals) => {
+      for (const v of vals) {
+        if (v === undefined || v === null) continue;
+        const s = String(v).trim();
+        if (s) return s;
+      }
+      return "";
+    };
     const toNumber = (x) => Number(String(x || 0).replace(/[,₹\s]/g, '')) || 0;
     const downPaymentFromValues =
       toNumber(
@@ -129,12 +148,59 @@ export default function FetchQuot({
         values.dp ||
         values["Down_Payment"]
       );
+    const savedAtFromValues = pickTimingValue(
+      values.savedAt,
+      values.SavedAt,
+      values["Saved At"],
+      values["Saved_At"]
+    );
+    const createdAtFromValues = pickTimingValue(
+      values.createdAt,
+      values.CreatedAt,
+      values["Created At"],
+      values["Created_At"]
+    );
+    const updatedAtFromValues = pickTimingValue(
+      values.updatedAt,
+      values.UpdatedAt,
+      values["Updated At"],
+      values["Updated_At"]
+    );
     if (pv && typeof pv === 'object') {
-      const branch = values.branch || values.Branch || '';
+      const branch = firstNonEmpty(values.branch, values.Branch);
+      const serialNo = firstNonEmpty(values.serialNo, values.Quotation_ID, values['Quotation_ID'], values['Quotation No']);
+      const name = firstNonEmpty(values.name, values.Customer_Name, values['Customer_Name'], values['Customer Name']);
+      const mobile = firstNonEmpty(values.mobile, values.Mobile, values['Mobile']);
+      const company = firstNonEmpty(values.company, values.Company);
+      const bikeModel = firstNonEmpty(values.bikeModel, values.Model);
+      const variant = firstNonEmpty(values.variant, values.Variant);
+      const executive = firstNonEmpty(values.executive, values.Executive_Name, values['Executive Name']);
+      const remarks = firstNonEmpty(values.remarks, values.Remarks);
+      const address = firstNonEmpty(values.address, values.Address);
+      const onRoadPrice = toNumber(values.onRoadPrice || values.OnRoadPrice || values['On-Road Price']);
       if (branch) {
         pv.branch = pv.branch || branch;
-        pv.formValues = { ...(pv.formValues || {}), branch: (pv.formValues && pv.formValues.branch) || branch };
       }
+      pv.formValues = { ...(pv.formValues || {}) };
+      if (!pv.formValues.serialNo && serialNo) pv.formValues.serialNo = serialNo;
+      if (!pv.formValues.name && name) pv.formValues.name = name;
+      if (!pv.formValues.mobile && mobile) pv.formValues.mobile = mobile;
+      if (!pv.formValues.company && company) pv.formValues.company = company;
+      if (!pv.formValues.bikeModel && bikeModel) pv.formValues.bikeModel = bikeModel;
+      if (!pv.formValues.variant && variant) pv.formValues.variant = variant;
+      if (!pv.formValues.executive && executive) pv.formValues.executive = executive;
+      if (!pv.formValues.remarks && remarks) pv.formValues.remarks = remarks;
+      if (!pv.formValues.branch && branch) pv.formValues.branch = branch;
+      if (!pv.formValues.address && address) pv.formValues.address = address;
+      if (!Number(pv.formValues.onRoadPrice || 0) && onRoadPrice > 0) pv.formValues.onRoadPrice = onRoadPrice;
+
+      if (!pv.serialNo && serialNo) pv.serialNo = serialNo;
+      if (!pv.company && company) pv.company = company;
+      if (!pv.model && bikeModel) pv.model = bikeModel;
+      if (!pv.variant && variant) pv.variant = variant;
+      if (!pv.savedAt && savedAtFromValues) pv.savedAt = savedAtFromValues;
+      if (!pv.createdAt && createdAtFromValues) pv.createdAt = createdAtFromValues;
+      if (!pv.updatedAt && updatedAtFromValues) pv.updatedAt = updatedAtFromValues;
       if (!pv.downPayment && downPaymentFromValues > 0) {
         pv.downPayment = downPaymentFromValues;
       }
@@ -142,7 +208,10 @@ export default function FetchQuot({
     }
     return {
       version: 0,
-      brand: 'SHANTHA',
+      brand: 'MOTERA',
+      savedAt: savedAtFromValues || "",
+      createdAt: createdAtFromValues || "",
+      updatedAt: updatedAtFromValues || "",
       mode: 'cash',
       vehicleType: 'scooter',
       fittings: [],
@@ -180,7 +249,7 @@ export default function FetchQuot({
     const data = normalizePayloadShape(dataRaw);
     try {
       // top-level states
-      setBrand?.(data.brand || "SHANTHA");
+      setBrand?.(data.brand || "MOTERA");
       setMode?.(data.mode || "cash");
       setVehicleType?.(data.vehicleType || "scooter");
       setFittings?.(Array.isArray(data.fittings) ? data.fittings : []);
@@ -215,6 +284,15 @@ export default function FetchQuot({
 
       // keep mirror in sync
       setOnRoadPrice?.(Number(fv.onRoadPrice ?? data.onRoadPrice ?? 0));
+
+      const metaSerial = String(fv.serialNo || data.serialNo || "").trim();
+      if (metaSerial && typeof onPayloadMeta === "function") {
+        onPayloadMeta({
+          serialNo: metaSerial,
+          savedAt: pickTimingValue(data.savedAt),
+          createdAt: pickTimingValue(data.createdAt),
+        });
+      }
 
       message.success("Quotation loaded.");
       setOpen(false);

@@ -1,7 +1,8 @@
 import React from "react";
-import { Table, Button, Space, Modal, Form, Input, Select, message, Tag, Row, Col, Typography, Tooltip, Grid } from "antd";
+import { Table, Button, Space, Modal, Form, Input, Select, message, Tag, Row, Col, Typography, Tooltip, Grid, Checkbox } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
-import { listBranches, listBranchesPublic, createBranch, updateBranch, deleteBranch } from "../../apiCalls/branches";
+import { listBranches, createBranch, updateBranch, deleteBranch } from "../../apiCalls/branches";
+import { getOwnerOrgName } from "../../utils/ownerConfig";
 
 const TYPE_OPTIONS = [
   { label: "Sales & Services", value: "sales & services" },
@@ -25,6 +26,9 @@ export default function Branches({ readOnly = false }) {
   const [modalOpen, setModalOpen] = React.useState(false);
   const [editing, setEditing] = React.useState(null);
   const [form] = Form.useForm();
+  const [isOwner, setIsOwner] = React.useState(false);
+  const [branchLimit, setBranchLimit] = React.useState(1);
+  const [limitReached, setLimitReached] = React.useState(false);
   const [q, setQ] = React.useState("");
   const [cityFilter, setCityFilter] = React.useState("all");
   const [typeFilter, setTypeFilter] = React.useState("all");
@@ -37,29 +41,35 @@ export default function Branches({ readOnly = false }) {
     setLoading(true);
     try {
       if (readOnly) {
-        const pub = await listBranchesPublic({ limit: 200 });
+        const pub = await listBranches({ limit: 200 });
         if (pub?.success) {
-          setItems(pub.data.items || []);
+          const nextItems = pub.data.items || [];
+          setItems(nextItems);
           setTotal(pub.data.total || 0);
+          if (isOwner) setLimitReached(nextItems.length >= branchLimit);
         } else {
           message.error(pub?.message || "Failed to load branches");
         }
       } else {
         const res = await listBranches({ limit: 200 });
         if (res?._status === 401 || res?._status === 403) {
-          const pub = await listBranchesPublic({ limit: 200 });
+          const pub = await listBranches({ limit: 200 });
           if (pub?.success) {
             message.info("Showing public branch list (read-only). Sign in for management.");
-            setItems(pub.data.items || []);
+            const nextItems = pub.data.items || [];
+            setItems(nextItems);
             setTotal(pub.data.total || 0);
+            if (isOwner) setLimitReached(nextItems.length >= branchLimit);
           } else {
             message.warning("Please login again to manage branches.");
             setItems([]);
             setTotal(0);
           }
         } else if (res?.success) {
-          setItems(res.data.items || []);
+          const nextItems = res.data.items || [];
+          setItems(nextItems);
           setTotal(res.data.total || 0);
+          if (isOwner) setLimitReached(nextItems.length >= branchLimit);
         } else {
           message.error(res?.message || "Failed to load branches");
         }
@@ -69,7 +79,15 @@ export default function Branches({ readOnly = false }) {
     } finally {
       setLoading(false);
     }
-  }, [readOnly]);
+  }, [readOnly, isOwner, branchLimit]);
+
+  React.useEffect(() => {
+    const u = (() => { try { return JSON.parse(localStorage.getItem('user')||'null'); } catch { return null; } })();
+    const role = String(u?.role || '').toLowerCase();
+    const limit = Number.isFinite(u?.ownerLimits?.branchLimit) ? Math.max(0, Math.floor(u.ownerLimits.branchLimit)) : 1;
+    setIsOwner(role === 'owner');
+    setBranchLimit(limit);
+  }, []);
 
   React.useEffect(() => { fetchList(); }, [fetchList]);
 
@@ -121,6 +139,10 @@ export default function Branches({ readOnly = false }) {
   };
 
   const onCreate = () => {
+    if (isOwner && limitReached) {
+      message.warning(`Branch limit reached (${branchLimit}). Contact admin to increase.`);
+      return;
+    }
     setEditing(null);
     setModalOpen(true);
     // Defer setting defaults until form is mounted in Modal
@@ -152,6 +174,7 @@ export default function Branches({ readOnly = false }) {
       staffIds: Array.isArray(row.staff) ? row.staff.map(String).join(',') : undefined,
       boysIds: Array.isArray(row.boys) ? row.boys.map(String).join(',') : undefined,
       mechanicsIds: Array.isArray(row.mechanics) ? row.mechanics.map(String).join(',') : undefined,
+      isDefault: !!row.isDefault,
     });
     setModalOpen(true);
   };
@@ -198,6 +221,7 @@ export default function Branches({ readOnly = false }) {
         lat: vals.lat,
         lng: vals.lng,
         status: vals.status,
+        isDefault: !!vals.isDefault,
         ...(vals.manager ? { manager: String(vals.manager).trim() } : {}),
         ...(vals.staffIds ? { staff: String(vals.staffIds).split(',').map(s => s.trim()).filter(Boolean) } : {}),
         ...(vals.boysIds ? { boys: String(vals.boysIds).split(',').map(s => s.trim()).filter(Boolean) } : {}),
@@ -206,7 +230,13 @@ export default function Branches({ readOnly = false }) {
       setSaving(true);
       let res;
       if (editing?.id) res = await updateBranch(editing.id, payload);
-      else res = await createBranch(payload);
+      else {
+        if (isOwner && limitReached) {
+          message.warning(`Branch limit reached (${branchLimit}). Contact admin to increase.`);
+          return;
+        }
+        res = await createBranch(payload);
+      }
       if (res?._status === 401 || res?._status === 403) {
         message.warning("Please login again to continue.");
         return;
@@ -239,6 +269,7 @@ export default function Branches({ readOnly = false }) {
     { title: "Name", dataIndex: "name", key: "name", width: 180, ellipsis: true, sorter: (a, b) => a.name.localeCompare(b.name), render: (v,r)=> (
       <span>
         {v}{' '}
+        {r.isDefault && <Tag color="gold" style={{ marginLeft: 6 }}>Default</Tag>}
         <Tooltip title="Open in Google Maps">
           {mapUrl(r) && <a href={mapUrl(r)} target="_blank" rel="noopener" style={{ fontSize: 12, marginLeft: 4 }}>Map</a>}
         </Tooltip>
@@ -285,6 +316,11 @@ export default function Branches({ readOnly = false }) {
           <Button type="primary" icon={<PlusOutlined />} onClick={onCreate}>
             New Branch
           </Button>
+        )}
+        {isOwner && (
+          <Tag color={limitReached ? "red" : "blue"}>
+            Limit: {items.length}/{branchLimit}
+          </Tag>
         )}
       </div>
 
@@ -335,7 +371,7 @@ export default function Branches({ readOnly = false }) {
             </Col>
             <Col xs={24} sm={12}>
               <Form.Item name="name" label="Name" rules={[{ required: true, message: "Name is required" }]}>
-                <Input placeholder="e.g., Byadarahalli Branch" />
+                <Input placeholder={`e.g., ${(getOwnerOrgName() || "Motera")} Branch`} />
               </Form.Item>
             </Col>
 
@@ -347,6 +383,11 @@ export default function Branches({ readOnly = false }) {
             <Col xs={24} sm={12}>
               <Form.Item name="status" label="Status" initialValue="active" rules={[{ required: true }]}>
                 <Select options={STATUS_OPTIONS} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item name="isDefault" valuePropName="checked">
+                <Checkbox>Default Branch</Checkbox>
               </Form.Item>
             </Col>
 

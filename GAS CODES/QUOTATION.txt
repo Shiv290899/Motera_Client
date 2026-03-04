@@ -98,7 +98,7 @@ function doPost(e) {
  * Quotation Web App (no-duplicate upsert by Quotation_ID) with dedicated remark columns.
  */
 const SHEET_ID = ''; // leave '' if bound to the target Sheet
-const SHEET_NAME = 'Sheet1'; // change to your tab name
+const SHEET_NAME = 'Quotations'; // change to your tab name
 
 // Preferred headers (tolerate variations when reading/writing)
 const HEADERS = [
@@ -113,10 +113,27 @@ const DEDUPE_ON_UPDATE = true;
 // ---------- Helpers ----------
 function getSheet_() {
   const ss = SHEET_ID ? SpreadsheetApp.openById(SHEET_ID) : SpreadsheetApp.getActiveSpreadsheet();
-  const sh = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
+  const sh = ss.getSheetByName(SHEET_NAME) || ss.insertSheet(SHEET_NAME);
   // Ensure a header row exists (don’t reorder existing columns)
   if (sh.getLastRow() === 0) {
     sh.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+  } else {
+    if (typeof ensureHeaders_ === 'function') {
+      ensureHeaders_(sh);
+    } else {
+      const headers = headerRow_(sh);
+      const existing = headers.map(h => String(h || '').trim()).filter(Boolean);
+      let updated = false;
+      HEADERS.forEach((h) => {
+        if (existing.indexOf(h) === -1) {
+          existing.push(h);
+          updated = true;
+        }
+      });
+      if (updated) {
+        sh.getRange(1, 1, 1, existing.length).setValues([existing]);
+      }
+    }
   }
   return sh;
 }
@@ -154,6 +171,22 @@ function headerIndex_(headers, want, rxAlt) {
     if (idx >= 0) return idx + 1;
   }
   return 0;
+}
+
+// Append missing preferred headers without reordering existing columns.
+function ensureHeaders_(sh) {
+  const headers = headerRow_(sh);
+  const existing = headers.map(h => String(h || '').trim()).filter(Boolean);
+  let updated = false;
+  HEADERS.forEach((h) => {
+    if (existing.indexOf(h) === -1) {
+      existing.push(h);
+      updated = true;
+    }
+  });
+  if (updated) {
+    sh.getRange(1, 1, 1, existing.length).setValues([existing]);
+  }
 }
 
 function idxTimestamp_(headers) { return headerIndex_(headers, 'Timestamp'); }
@@ -232,8 +265,14 @@ function saveQuotation_(data) {
     const cPay  = idxPayload_(headers);
     const cBr   = idxBranch_(headers);
     const cEx   = idxExecutive_(headers);
-    const cSer  = idxSerial_(headers);
-    if (!cSer) return { success:false, message:'Quotation_ID column not found' };
+    let cSer  = idxSerial_(headers);
+    if (!cSer) {
+      cSer = headers.length + 1;
+      sh.getRange(1, cSer).setValue('Quotation_ID');
+      headers = headerRow_(sh);
+      cSer = idxSerial_(headers);
+      if (!cSer) return { success:false, message:'Quotation_ID column not found' };
+    }
 
     const now = new Date();
     const values = {
@@ -483,6 +522,7 @@ function list_({ page = 1, pageSize = 10, limit = 0, branch = '', mode = '', q =
   const cRT = idxRemarkText_(headers) - 1; // may be -1 if not present
 
   const wantBranchKey = norm_((branch || ''));
+  const normKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
   const wantMode = String(mode || '').toLowerCase();
   const wantStatus = String(status || '').toLowerCase();
   const wantQ = String(q || '').trim();
@@ -543,7 +583,12 @@ function list_({ page = 1, pageSize = 10, limit = 0, branch = '', mode = '', q =
 
   // Filters
   let filtered = enriched.filter((x) => {
-    if (wantBranchKey && norm_(x.rowBranchRaw) !== wantBranchKey) return false;
+    if (wantBranchKey) {
+      const rowKey = norm_(x.rowBranchRaw);
+      const a = normKey(wantBranchKey);
+      const b = normKey(rowKey);
+      if (a && b && a !== b && !b.includes(a) && !a.includes(b)) return false;
+    }
     if (wantMode && x.modeRaw !== wantMode) return false;
     if (wantStatus && x.followUpStatus !== wantStatus) return false;
     if (start && end) {
