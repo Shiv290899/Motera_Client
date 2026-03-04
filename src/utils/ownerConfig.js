@@ -458,23 +458,13 @@ export const resolveWebhookUrl = (fallback) => {
   return ownerUrl || fallback || "";
 };
 
-export const resolveUnifiedGasUrl = (moduleKey, fallback) => {
+export const resolveUnifiedGasUrl = (moduleKey) => {
   const ownerUrl = getOwnerWebhookUrl();
-  if (shouldEnforceOwnerWebhook_()) {
-    if (!ownerUrl) return "";
-    if (!moduleKey) return ownerUrl;
-    if (/[?&]module=/.test(ownerUrl)) return ownerUrl;
-    const sep = ownerUrl.includes('?') ? '&' : '?';
-    return `${ownerUrl}${sep}module=${encodeURIComponent(moduleKey)}`;
-  }
-  const unifiedUrl = (import.meta?.env?.VITE_UNIFIED_GAS_URL || '').trim();
-  const base = ownerUrl || unifiedUrl || '';
-  const baseUrl = base || fallback || '';
-  if (!baseUrl) return '';
-  if (!moduleKey) return baseUrl;
-  if (/[?&]module=/.test(baseUrl)) return baseUrl;
-  const sep = baseUrl.includes('?') ? '&' : '?';
-  return `${baseUrl}${sep}module=${encodeURIComponent(moduleKey)}`;
+  if (!ownerUrl) return "";
+  if (!moduleKey) return ownerUrl;
+  if (/[?&]module=/.test(ownerUrl)) return ownerUrl;
+  const sep = ownerUrl.includes("?") ? "&" : "?";
+  return `${ownerUrl}${sep}module=${encodeURIComponent(moduleKey)}`;
 };
 
 export const resolveLogoUrl = (fallback) => {

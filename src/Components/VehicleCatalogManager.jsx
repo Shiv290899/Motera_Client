@@ -3,51 +3,16 @@ import dayjs from 'dayjs'
 import { Table, Button, Space, Modal, Form, Input, InputNumber, message, Popconfirm, Alert, Typography, Tag, Select, Grid } from 'antd'
 import { ReloadOutlined, PlusOutlined, EditOutlined } from '@ant-design/icons'
 import { exportToCsv } from '../utils/csvExport'
-import { getOwnerWebhookUrl, readLocalUser, resolveUnifiedGasUrl } from '../utils/ownerConfig'
+import { resolveUnifiedGasUrl } from '../utils/ownerConfig'
 
 const { Text } = Typography
 
-// Helpers reused from Quotation/Stock for CSV fallback
 const HEADERS = {
   company: ['Company', 'Company Name'],
   model: ['Model', 'Model Name'],
   variant: ['Variant'],
   color: ['Color', 'Colours', 'Colors', 'Colour', 'Available Colors'],
   price: ['On-Road Price', 'On Road Price', 'OnRoadPrice', 'Price'],
-}
-
-const parseCsv = (text) => {
-  const rows = []
-  let row = [], col = '', inQuotes = false
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i], n = text[i + 1]
-    if (c === '"' && !inQuotes) { inQuotes = true; continue }
-    if (c === '"' && inQuotes) { if (n === '"') { col += '"'; i++; continue } inQuotes = false; continue }
-    if (c === ',' && !inQuotes) { row.push(col); col = ''; continue }
-    if ((c === '\n' || c === '\r') && !inQuotes) {
-      if (col !== '' || row.length) { row.push(col); rows.push(row); row = []; col = '' }
-      if (c === '\r' && n === '\n') i++
-      continue
-    }
-    col += c
-  }
-  if (col !== '' || row.length) { row.push(col); rows.push(row) }
-  return rows
-}
-
-const fetchSheetRowsCSV = async (url) => {
-  const res = await fetch(url, { cache: 'no-store' })
-  if (!res.ok) throw new Error('Sheet fetch failed')
-  const csv = await res.text()
-  if (csv.trim().startsWith('<')) throw new Error('Expected CSV, got HTML')
-  const rows = parseCsv(csv)
-  if (!rows.length) return []
-  const headers = rows[0].map((h) => (h || '').trim())
-  return rows.slice(1).map((r) => {
-    const obj = {}
-    headers.forEach((h, i) => (obj[h] = r[i] ?? ''))
-    return obj
-  })
 }
 
 const pick = (row, keys) => String(keys.map((k) => row[k] ?? '').find((v) => v !== '') || '').trim()
@@ -107,22 +72,10 @@ const normalizeRow = (row = {}) => {
   }
 }
 
-export default function VehicleCatalogManager({ csvFallbackUrl }) {
+export default function VehicleCatalogManager() {
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
-  const sessionUser = readLocalUser()
-  const sessionRole = String(sessionUser?.role || '').trim().toLowerCase()
-  const enforceOwnerWebhook =
-    sessionRole === 'owner' ||
-    sessionRole === 'staff' ||
-    sessionRole === 'mechanic' ||
-    sessionRole === 'callboy'
-  const ownerWebhookUrl = getOwnerWebhookUrl()
-  const envCatalogUrl = String(import.meta.env.VITE_VEHICLE_CATALOG_GAS_URL || '').trim()
-  const GAS_URL = resolveUnifiedGasUrl(
-    'catalog',
-    enforceOwnerWebhook ? (ownerWebhookUrl || '') : envCatalogUrl
-  )
+  const GAS_URL = resolveUnifiedGasUrl('catalog')
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -140,7 +93,7 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
   const catalogKey = (r) => `${String(r.company || '').trim().toUpperCase()}|${String(r.model || '').trim().toUpperCase()}|${String(r.variant || '').trim().toUpperCase()}`
 
   const listVehicleCatalog = async () => {
-    if (!GAS_URL) throw new Error('VEHICLE_CATALOG_GAS_URL is not configured')
+    if (!GAS_URL) throw new Error('Owner web app URL is not configured')
     const url = appendQuery(GAS_URL, { action: 'list' })
     const res = await fetch(url, { method: 'GET', mode: 'cors', credentials: 'omit' })
     if (!res.ok) throw new Error('Failed to fetch catalog')
@@ -148,7 +101,7 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
   }
 
   const upsertVehicleCatalogRow = async (payload) => {
-    if (!GAS_URL) throw new Error('VEHICLE_CATALOG_GAS_URL is not configured')
+    if (!GAS_URL) throw new Error('Owner web app URL is not configured')
     const body = new URLSearchParams({ action: 'upsert', ...payload })
     const res = await fetch(GAS_URL, {
       method: 'POST',
@@ -162,7 +115,7 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
   }
 
   const deleteVehicleCatalogRow = async (payload) => {
-    if (!GAS_URL) throw new Error('VEHICLE_CATALOG_GAS_URL is not configured')
+    if (!GAS_URL) throw new Error('Owner web app URL is not configured')
     const body = new URLSearchParams({ action: 'delete', ...payload })
     const res = await fetch(GAS_URL, {
       method: 'POST',
@@ -189,22 +142,10 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
       const data = resp?.data || resp?.items || resp?.rows || resp || []
       const norm = Array.isArray(data) ? data.map(normalizeRow).filter((r) => r.company && r.model && r.variant) : []
       setRows(norm)
-      if (resp?.ok === false && /catalog gas url/i.test(String(resp?.message || ''))) setGasMissing(true)
+      if (resp?.ok === false && /(catalog gas url|web app url|webhook)/i.test(String(resp?.message || ''))) setGasMissing(true)
     } catch  {
-      // Do not allow CSV/default fallback for authenticated owner/staff-like sessions.
-      if (!enforceOwnerWebhook && csvFallbackUrl) {
-        try {
-          const csvRows = await fetchSheetRowsCSV(csvFallbackUrl)
-          const norm = csvRows.map(normalizeRow).filter((r) => r.company && r.model && r.variant)
-          setRows(norm)
-          setGasMissing(true) // saving will be disabled
-        } catch {
-          setRows([])
-        }
-      } else {
-        setRows([])
-        setGasMissing(true)
-      }
+      setRows([])
+      setGasMissing(true)
     } finally {
       setLoading(false)
     }
@@ -389,7 +330,7 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
           <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>Reload</Button>
           <Button onClick={handleExportCsv}>Export CSV</Button>
           {gasMissing && (
-            <Tag color="red">Save disabled (configure VEHICLE_CATALOG_GAS_URL)</Tag>
+            <Tag color="red">Save disabled (configure owner web app URL)</Tag>
           )}
         </Space>
         <Space wrap>
@@ -423,12 +364,8 @@ export default function VehicleCatalogManager({ csvFallbackUrl }) {
           showIcon
           type="warning"
           style={{ marginBottom: 12 }}
-          message="Catalog GAS URL not configured"
-          description={
-            enforceOwnerWebhook
-              ? "Owner/Staff session requires Owner Profile webhook URL. Configure owner webhook URL to load and save catalog."
-              : "Listing can use CSV fallback, but saving/updating requires VEHICLE_CATALOG_GAS_URL in the environment."
-          }
+          message="Owner web app URL not configured"
+          description="Configure the owner web app URL in Owner Profile to load and save vehicle catalog data."
         />
       )}
       <div style={{ marginBottom: 12, fontSize: 12, color: '#475569' }}>

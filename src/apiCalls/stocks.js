@@ -1,14 +1,8 @@
-import axios from "axios";
 import { axiosInstance } from "./index";
 import { resolveUnifiedGasUrl } from '../utils/ownerConfig';
 
-// Stocks are backed by a Google Apps Script Web App, but browsers often hit CORS issues with direct calls.
-// Prefer calling our backend proxy (`/api/stocks/gas`) via `axiosInstance` and fall back to direct GAS only if needed.
-const DEFAULT_GAS_STOCKS_URL =
-  "https://script.google.com/macros/s/AKfycbz_DoNoD0XTx3RNMOSZfypbMqWVN4yTy3ct96aE4LhJ9yb_YvKr0GRbO_GA3Fgkwptb/exec?module=stocks";
-const DIRECT_GAS_STOCKS_URL = import.meta.env.VITE_STOCKS_GAS_URL || "";
-const getActiveGasUrl = () =>
-  resolveUnifiedGasUrl('stocks', DIRECT_GAS_STOCKS_URL || DEFAULT_GAS_STOCKS_URL);
+// Stocks are owner-scoped. URL must come from owner profile webhook configuration.
+const getActiveGasUrl = () => resolveUnifiedGasUrl('stocks');
 
 const isPlainObject = (v) => v && typeof v === "object" && !Array.isArray(v);
 const normalizeStockPatch = (patch = {}) => {
@@ -42,6 +36,7 @@ const normalizeStockPatch = (patch = {}) => {
 
 const gasGet = async (params) => {
   const activeGasUrl = getActiveGasUrl();
+  if (!activeGasUrl) return { ok: false, message: "Owner web app URL is not configured." };
   // 1) Backend proxy (preferred)
   try {
     const res = await axiosInstance.get("/stocks/gas", {
@@ -52,19 +47,12 @@ const gasGet = async (params) => {
   } catch {
     // ignore and fall back
   }
-
-  // 2) Direct GAS (fallback)
-  const url = activeGasUrl || DEFAULT_GAS_STOCKS_URL;
-  try {
-    const res = await axios.get(url, { params, validateStatus: () => true });
-    return res?.data || {};
-  } catch {
-    return {};
-  }
+  return {};
 };
 
 const gasPost = async (payload) => {
   const activeGasUrl = getActiveGasUrl();
+  if (!activeGasUrl) return { ok: false, message: "Owner web app URL is not configured." };
   // 1) Backend proxy (preferred)
   try {
     const res = await axiosInstance.post("/stocks/gas", { ...(payload || {}), ...(activeGasUrl ? { gasUrl: activeGasUrl } : {}) }, {
@@ -74,25 +62,7 @@ const gasPost = async (payload) => {
   } catch {
     // ignore and fall back
   }
-
-  // 2) Direct GAS (fallback)
-  const url = activeGasUrl || DEFAULT_GAS_STOCKS_URL;
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      mode: "cors",
-      credentials: "omit",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(payload || {}),
-    });
-    try {
-      return await res.json();
-    } catch {
-      return {};
-    }
-  } catch {
-    return {};
-  }
+  return {};
 };
 
 // Fetch stock movements. Default to a high limit so admin can see all recent records.
