@@ -28,7 +28,12 @@ export const RegisterUser = async (values) => {
 // Login with clear status handling (no throw) so UI can show precise messages
 export const LoginUser = async (values) => {
   try {
-    const res = await axiosInstance.post("/users/login", values, { validateStatus: () => true });
+    const res = await axiosInstance.request({
+      url: "/users/login",
+      method: "POST",
+      data: values,
+      validateStatus: () => true,
+    });
     const status = res?.status;
     const payload = res?.data || {};
     if (status >= 200 && status < 300) {
