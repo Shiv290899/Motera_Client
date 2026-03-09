@@ -25,7 +25,6 @@ const Backend = lazy(() => import("./Components/Backend"));
 const Employees = lazy(() => import("./Components/Employees"));
 const Products = lazy(() => import("./Components/Products"));
 const Service = lazy(() => import("./Components/Service"));
-const Gallery = lazy(() => import("./Components/Gallery"));
 
 
 function App() {
@@ -61,7 +60,7 @@ function App() {
           <Route path="/contact" element={<Contact />} />
           <Route path="/products" element={<Products />} />
           <Route path="/service" element={<Service />} />
-          <Route path="/gallery" element={<Gallery />} />
+
           <Route path="*" element={<Home />} />
         </Routes>
       </Suspense>

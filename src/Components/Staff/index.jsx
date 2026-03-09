@@ -14,6 +14,8 @@ import VehicleSearch from "../VehicleSearch";
 import useAnnouncementBadge from "../../hooks/useAnnouncementBadge";
 import { GetCurrentUser } from "../../apiCalls/users";
 import StaffAccountCard from "../StaffAccountCard";
+import { listBranchesPublic } from "../../apiCalls/branches";
+import { getTenantOwnerId } from "../../utils/ownerConfig";
 
 
 
@@ -21,6 +23,7 @@ export default function Staff() {
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md; // < md considered mobile/tablet portrait
   const [branchName, setBranchName] = React.useState("");
+  const [showStockFinder, setShowStockFinder] = React.useState(false);
 
   const container = { maxWidth: 1200, margin: "0 auto", padding: isMobile ? 12 : 16 };
   const wrap = { paddingTop: 12, width: "100%", overflowX: "auto", minWidth: 0 };
@@ -59,6 +62,15 @@ export default function Staff() {
         }
         const bn = user?.formDefaults?.branchName || user?.primaryBranch?.name || (Array.isArray(user?.branches) ? (typeof user.branches[0] === 'string' ? user.branches[0] : (user.branches[0]?.name || '')) : '');
         setBranchName(bn || "");
+        // Show Stock Finder based on OWNER branch count (not just staff-assigned branches).
+        const ownerId = getTenantOwnerId();
+        if (!ownerId) {
+          setShowStockFinder(false);
+          return;
+        }
+        const resp = await listBranchesPublic({ ownerId, limit: 500, page: 1 }).catch(() => null);
+        const items = Array.isArray(resp?.data?.items) ? resp.data.items : [];
+        setShowStockFinder(items.length > 1);
       } catch { setBranchName(""); }
     })();
   }, []);
@@ -109,15 +121,17 @@ export default function Staff() {
         </div>
       ),
     },
-    {
-      key: "stock",
-      label: tabLabel('🔎', "Stock Finder"),
-      children: (
-        <div style={wrap}>
-          <InStockUpdate />
-        </div>
-      ),
-    },
+    ...(showStockFinder
+      ? [{
+          key: "stock",
+          label: tabLabel('🔎', "Stock Finder"),
+          children: (
+            <div style={wrap}>
+              <InStockUpdate />
+            </div>
+          ),
+        }]
+      : []),
     {
       key: "stock-update",
       label: tabLabel('📦', "Stock Update"),

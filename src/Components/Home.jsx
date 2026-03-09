@@ -1,886 +1,428 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { getOwnerOrgName } from "../utils/ownerConfig";
 import { FaWhatsapp } from "react-icons/fa";
-
 import { BUSINESS_HOURS, CONTACT_EMAIL } from "../data/contactInfo";
+import { getOwnerOrgName } from "../utils/ownerConfig";
 
-/**
- * Motera - Heroic Home
- * Built with plain React + CSS-in-JS styles for quick drop-in.
- * Sections:
- *  - Neon glass hero with marquee
- *  - Why-us highlight grid
- *  - CTA ribbon
- *  - Services trio
- *  - Featured products
- *  - Ownership journey timeline
- *  - Visit & enquiry panel with QR
- *  - About + Reviews
- *  - WhatsApp floating action button
- */
 export default function Home() {
   const orgName = getOwnerOrgName() || "Motera";
-  const useScreen = () => {
-    const [width, setWidth] = React.useState(
-      typeof window !== "undefined" ? window.innerWidth : 1280
-    );
-    React.useEffect(() => {
-      const onResize = () => setWidth(window.innerWidth);
-      window.addEventListener("resize", onResize);
-      return () => window.removeEventListener("resize", onResize);
-    }, []);
-    const isMobile = width <= 480;
-    const isTablet = width > 480 && width <= 1024;
-    const isDesktop = width > 1024;
-    return { width, isMobile, isTablet, isDesktop };
-  };
+  const [width, setWidth] = React.useState(
+    typeof window !== "undefined" ? window.innerWidth : 1280
+  );
 
-  const { isMobile, isTablet } = useScreen();
+  React.useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
-  const reviewCols = isMobile ? 1 : isTablet ? 2 : 3;
-  const containerPad = isMobile ? 14 : 22;
-  const heroHeight = isMobile ? 520 : isTablet ? 620 : 720;
-  const heroTitleSize = isMobile ? 34 : isTablet ? 48 : 62;
-  const heroSubSize = isMobile ? 14 : isTablet ? 16 : 18;
-  const gridCols = isMobile ? "1fr" : isTablet ? "repeat(2, 1fr)" : "repeat(3, 1fr)";
-  const aboutGrid = isMobile ? "1fr" : "1.2fr 1fr";
-  const highlightCols = isMobile ? "1fr" : isTablet ? "repeat(2, 1fr)" : "repeat(4, 1fr)";
-  const modelCols = isMobile ? "1fr" : isTablet ? "repeat(2, 1fr)" : "repeat(3, 1fr)";
-  const journeyCols = isMobile ? "1fr" : "repeat(4, minmax(0, 1fr))";
+  const isMobile = width <= 640;
+  const isTablet = width > 640 && width <= 1024;
 
   const styles = {
-    root: { background: "#060913", color: "#e5e7eb" },
-    container: { maxWidth: 1240, margin: "0 auto", padding: `0 ${containerPad}px` },
-    navWrap: {
-      position: "sticky",
-      top: 0,
-      zIndex: 50,
-      backdropFilter: "blur(12px)",
-      background: "linear-gradient(180deg, rgba(6,9,19,0.85), rgba(6,9,19,0.35))",
-      borderBottom: "1px solid rgba(148,163,184,0.12)",
+    page: {
+      minHeight: "100vh",
+      background:
+        "radial-gradient(1200px 700px at 15% -10%, rgba(14,165,233,0.18), transparent 62%), radial-gradient(1100px 650px at 88% 0%, rgba(249,115,22,0.16), transparent 58%), linear-gradient(180deg, #0b1220 0%, #0f172a 52%, #111827 100%)",
+      color: "#e5e7eb",
+      fontFamily: "Sora, Manrope, Segoe UI, sans-serif",
     },
-    nav: {
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between",
-      height: 64,
+    container: {
+      maxWidth: 1180,
+      margin: "0 auto",
+      padding: isMobile ? "14px" : "18px 22px",
     },
-    logo: {
-      fontWeight: 900,
-      letterSpacing: 0.6,
-      background: "linear-gradient(92deg,#22d3ee,#a78bfa,#f472b6)",
-      WebkitBackgroundClip: "text",
-      backgroundClip: "text",
-      color: "transparent",
-      fontSize: isMobile ? 18 : 22,
-    },
-    navLinks: {
-      display: isMobile ? "none" : "flex",
-      gap: 16,
-      fontWeight: 700,
-      fontSize: 14,
-    },
-    navLink: { color: "#cbd5e1", textDecoration: "none" },
-    heroWrap: {
-      position: "relative",
-      height: heroHeight,
-      borderRadius: 22,
-      overflow: "hidden",
-      boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
+    hero: {
       marginTop: 12,
-      isolation: "isolate",
-    },
-    heroAurora: {
-      position: "absolute",
-      inset: -120,
+      borderRadius: 24,
+      padding: isMobile ? 18 : 28,
+      border: "1px solid rgba(148,163,184,0.22)",
       background:
-        "radial-gradient(700px 300px at 20% 10%, rgba(99,102,241,0.22), transparent 60%),\n         radial-gradient(700px 300px at 80% 20%, rgba(16,185,129,0.22), transparent 60%),\n         radial-gradient(700px 300px at 50% 85%, rgba(236,72,153,0.22), transparent 60%)",
-      filter: "blur(8px)",
-    },
-    heroNoise: {
-      position: "absolute",
-      inset: 0,
-      background:
-        "url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"160\" height=\"160\"><filter id=\"n\"><feTurbulence type=\"fractalNoise\" baseFrequency=\"0.7\" numOctaves=\"2\" stitchTiles=\"stitch\"/></filter><rect width=\"100%\" height=\"100%\" filter=\"url(%23n)\" opacity=\"0.04\"/></svg>')",
-      opacity: 0.35,
-      mixBlendMode: "overlay",
-    },
-    heroImg: {
-      position: "absolute",
-      inset: 0,
-      background:
-        "url('https://images.unsplash.com/photo-1517602302552-471fe67acf66?q=80&w=1600&auto=format&fit=crop') center/cover no-repeat",
-      filter: "brightness(0.5) saturate(1.2)",
-      transform: "scale(1.06)",
-    },
-    heroOverlay: {
-      position: "absolute",
-      inset: 0,
-      background: "radial-gradient(ellipse at 50% 100%, rgba(6,9,19,0) 20%, rgba(6,9,19,0.55) 70%)",
-    },
-    heroContent: {
-      position: "relative",
-      zIndex: 2,
-      height: "100%",
+        "linear-gradient(140deg, rgba(17,24,39,0.86), rgba(15,23,42,0.8) 40%, rgba(30,58,138,0.42) 100%)",
+      boxShadow: "0 28px 80px rgba(0,0,0,0.4)",
       display: "grid",
-      gridTemplateColumns: isMobile ? "1fr" : "1.05fr 0.95fr",
+      gridTemplateColumns: isMobile ? "1fr" : "1.2fr 0.8fr",
       gap: 18,
-      alignItems: "center",
-      padding: isMobile ? 14 : 24,
+      position: "relative",
+      overflow: "hidden",
     },
-    heroTitle: {
-      fontSize: heroTitleSize,
-      fontWeight: 900,
-      lineHeight: 1.02,
-      margin: 0,
-      letterSpacing: -0.5,
-      background: "linear-gradient(90deg,#38bdf8,#a78bfa 35%,#f472b6 65%,#22d3ee)",
-      WebkitBackgroundClip: "text",
-      backgroundClip: "text",
-      color: "transparent",
-      textShadow: "0 10px 40px rgba(34,211,238,0.25)",
-    },
-    heroUnderline: {
-      height: 4,
-      borderRadius: 999,
+    heroGlow: {
+      position: "absolute",
+      inset: -100,
+      pointerEvents: "none",
       background:
-        "linear-gradient(90deg, rgba(56,189,248,0) 0%, rgba(56,189,248,1) 20%, rgba(167,139,250,1) 50%, rgba(244,114,182,1) 80%, rgba(34,211,238,0) 100%)",
-      marginTop: 10,
-      width: "60%",
-      animation: "slideGlow 5s ease-in-out infinite",
+        "radial-gradient(500px 240px at 10% 20%, rgba(14,165,233,0.2), transparent 65%), radial-gradient(450px 220px at 90% 80%, rgba(251,146,60,0.2), transparent 60%)",
+      filter: "blur(10px)",
+      opacity: 0.9,
     },
-    heroSub: { fontSize: heroSubSize, color: "#cbd5e1", marginTop: 12, maxWidth: 520 },
-    ctaDock: {
-      marginTop: 16,
+    badgeRow: { display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 },
+    badge: {
+      fontSize: 12,
+      fontWeight: 800,
+      letterSpacing: 0.3,
+      padding: "5px 10px",
+      borderRadius: 999,
+      color: "#cbd5e1",
+      border: "1px solid rgba(148,163,184,0.28)",
+      background: "rgba(15,23,42,0.52)",
+    },
+    title: {
+      margin: 0,
+      fontSize: isMobile ? 30 : isTablet ? 44 : 58,
+      lineHeight: 1.02,
+      fontWeight: 900,
+      letterSpacing: -0.4,
+      color: "#f8fafc",
+      textWrap: "balance",
+    },
+    titleEm: {
+      color: "#f59e0b",
+      textShadow: "0 0 24px rgba(245,158,11,0.4)",
+    },
+    subtitle: {
+      marginTop: 12,
+      marginBottom: 0,
+      fontSize: isMobile ? 14 : 17,
+      maxWidth: 670,
+      lineHeight: 1.6,
+      color: "#cbd5e1",
+    },
+    ctaRow: {
+      marginTop: 18,
       display: "flex",
-      gap: 12,
       flexWrap: "wrap",
+      gap: 10,
       alignItems: "center",
-      padding: 12,
-      borderRadius: 14,
-      background: "rgba(2,6,23,0.55)",
-      border: "1px solid rgba(148,163,184,0.2)",
-      boxShadow: "0 12px 36px rgba(0,0,0,0.35)",
-      backdropFilter: "blur(10px)",
-      width: "max-content",
     },
     ctaPrimary: {
-      background: "linear-gradient(90deg,#ef4444,#e11d48,#a21caf)",
-      color: "white",
-      padding: isMobile ? "12px 16px" : "12px 22px",
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: isMobile ? "11px 15px" : "12px 18px",
       borderRadius: 12,
-      border: 0,
-      cursor: "pointer",
+      background: "linear-gradient(90deg, #f97316, #ef4444)",
+      color: "#fff",
+      textDecoration: "none",
       fontWeight: 900,
       letterSpacing: 0.3,
-      boxShadow: "0 12px 28px rgba(225,29,72,0.35)",
-      transition: "transform .15s ease, box-shadow .15s ease",
+      boxShadow: "0 16px 36px rgba(239,68,68,0.35)",
     },
     ctaGhost: {
-      background: "transparent",
-      color: "#e5e7eb",
-      padding: isMobile ? "12px 16px" : "12px 22px",
-      borderRadius: 12,
-      border: "1px solid rgba(148,163,184,0.45)",
-      cursor: "pointer",
-      fontWeight: 900,
-      letterSpacing: 0.3,
-      transition: "transform .15s ease, box-shadow .15s ease",
-    },
-    heroRightCard: {
-      alignSelf: "center",
-      justifySelf: "center",
-      width: "100%",
-      maxWidth: 520,
-      borderRadius: 16,
-      padding: 16,
-      background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))",
-      border: "1px solid rgba(148,163,184,0.22)",
-      boxShadow: "0 18px 50px rgba(0,0,0,0.35)",
-      transform: "perspective(1000px) rotateX(2deg) rotateY(-2deg)",
-    },
-    highlightGrid: {
-      display: "grid",
-      gridTemplateColumns: highlightCols,
-      gap: 16,
-      marginTop: 26,
-    },
-    highlightCard: {
-      position: "relative",
-      borderRadius: 18,
-      padding: 18,
-      background: "linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02))",
-      border: "1px solid rgba(148,163,184,0.24)",
-      boxShadow: "0 18px 48px rgba(0,0,0,0.32)",
-      overflow: "hidden",
-    },
-    highlightGlow: {
-      position: "absolute",
-      inset: -40,
-      opacity: 0.55,
-      filter: "blur(14px)",
-      mixBlendMode: "screen",
-      pointerEvents: "none",
-    },
-    highlightIcon: { fontSize: 28, marginBottom: 12 },
-    highlightTitle: { fontWeight: 800, fontSize: 16, color: "#e2e8f0", marginBottom: 6 },
-    highlightText: { fontSize: 13, color: "#cbd5e1", lineHeight: 1.6 },
-    ribbon: {
-      marginTop: 12,
-      borderRadius: 18,
-      padding: isMobile ? "18px 20px" : "26px 32px",
-      display: "flex",
-      flexDirection: isMobile ? "column" : "row",
-      alignItems: isMobile ? "flex-start" : "center",
-      justifyContent: "space-between",
-      gap: 14,
-      background: "linear-gradient(95deg,#0f172a 0%,#1d4ed8 45%,#be123c 100%)",
-      boxShadow: "0 24px 70px rgba(29,78,216,0.55)",
-      border: "1px solid rgba(59,130,246,0.35)",
-    },
-    ribbonText: { color: "#e2e8f0", fontWeight: 900, fontSize: isMobile ? 18 : 24, lineHeight: 1.2 },
-    ribbonSub: { color: "#cbd5e1", fontSize: 13, marginTop: 6, maxWidth: 520 },
-    ribbonCta: {
       display: "inline-flex",
       alignItems: "center",
-      gap: 10,
-      background: "rgba(15,23,42,0.85)",
-      color: "#f8fafc",
-      padding: "12px 20px",
-      borderRadius: 12,
-      fontWeight: 800,
-      textDecoration: "none",
-      border: "1px solid rgba(226,232,240,0.25)",
-      boxShadow: "0 14px 34px rgba(15,23,42,0.45)",
-    },
-    grid3: { display: "grid", gridTemplateColumns: gridCols, gap: 18 },
-    cardWrap: {
-      position: "relative",
-      padding: 2,
-      borderRadius: 18,
-      background:
-        "conic-gradient(from 180deg at 50% 50%, #22d3ee, #a78bfa, #f472b6, #22c55e, #22d3ee)",
-    },
-    card: {
-      borderRadius: 16,
-      padding: 18,
-      background: "linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02))",
-      border: "1px solid rgba(148,163,184,0.22)",
-      boxShadow: "0 12px 38px rgba(0,0,0,0.3)",
-      height: "100%",
-      transform: "perspective(900px) rotateX(0deg) rotateY(0deg)",
-      transition: "transform .2s ease, box-shadow .2s ease",
-    },
-    modelsGrid: {
-      display: "grid",
-      gridTemplateColumns: modelCols,
-      gap: 18,
-      marginTop: 18,
-    },
-    modelCard: {
-      position: "relative",
-      borderRadius: 20,
-      padding: 18,
-      background: "linear-gradient(180deg, rgba(15,23,42,0.92), rgba(15,23,42,0.6))",
-      border: "1px solid rgba(148,163,184,0.26)",
-      boxShadow: "0 24px 60px rgba(0,0,0,0.38)",
-      display: "grid",
-      gap: 14,
-      overflow: "hidden",
-    },
-    modelBadge: {
-      alignSelf: "start",
-      fontSize: 12,
-      padding: "4px 10px",
-      borderRadius: 999,
-      background: "rgba(56,189,248,0.16)",
-      color: "#38bdf8",
-      fontWeight: 800,
-      width: "max-content",
-    },
-    modelImageWrap: {
-      position: "relative",
-      borderRadius: 16,
-      overflow: "hidden",
-      background: "linear-gradient(135deg, rgba(56,189,248,0.18), rgba(244,114,182,0.12))",
-    },
-    modelImage: {
-      width: "100%",
-      height: isMobile ? 160 : 200,
-      objectFit: "cover",
-      display: "block",
-      borderRadius: 16,
-    },
-    modelTitle: { fontWeight: 900, fontSize: 18, color: "#f8fafc" },
-    modelMeta: { display: "flex", justifyContent: "space-between", color: "#cbd5e1", fontSize: 13 },
-    modelCta: {
-      display: "inline-flex",
-      gap: 8,
-      alignItems: "center",
-      padding: "10px 16px",
+      justifyContent: "center",
+      padding: isMobile ? "11px 15px" : "12px 18px",
       borderRadius: 12,
       border: "1px solid rgba(148,163,184,0.35)",
+      color: "#e2e8f0",
       textDecoration: "none",
-      color: "#93c5fd",
       fontWeight: 800,
-      background: "rgba(15,23,42,0.55)",
-      width: "max-content",
+      background: "rgba(2,6,23,0.35)",
     },
-    stats: {
-      display: "grid",
-      gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(4,1fr)",
-      gap: 14,
-      marginTop: 14,
-    },
-    statCard: {
-      background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))",
-      border: "1px solid rgba(148,163,184,0.22)",
-      borderRadius: 14,
-      padding: 14,
-      textAlign: "center",
-    },
-    journeyGrid: {
-      display: "grid",
-      gridTemplateColumns: journeyCols,
-      gap: 18,
-      marginTop: 22,
-    },
-    journeyCard: {
-      position: "relative",
-      borderRadius: 18,
-      padding: 18,
-      background: "linear-gradient(180deg, rgba(255,255,255,0.07), rgba(15,23,42,0.5))",
-      border: "1px solid rgba(148,163,184,0.25)",
-      boxShadow: "0 18px 50px rgba(0,0,0,0.32)",
+    heroPanel: {
+      borderRadius: 16,
+      padding: 16,
+      border: "1px solid rgba(148,163,184,0.26)",
+      background: "rgba(2,6,23,0.45)",
       display: "grid",
       gap: 12,
+      alignContent: "start",
     },
-    journeyMarker: {
-      display: "flex",
-      alignItems: "center",
-      gap: 12,
-    },
-    journeyDot: {
-      height: 14,
-      width: 14,
-      borderRadius: "50%",
-      background: "linear-gradient(135deg,#38bdf8,#f472b6)",
-      boxShadow: "0 0 12px rgba(244,114,182,0.6)",
-    },
-    journeyLine: {
-      flex: 1,
-      height: 2,
-      background: "linear-gradient(90deg, rgba(56,189,248,0.1), rgba(244,114,182,0.6), rgba(56,189,248,0.1))",
-    },
-    journeyStage: { color: "#e2e8f0", fontWeight: 800, fontSize: 15 },
-    journeyText: { color: "#cbd5e1", fontSize: 13, lineHeight: 1.6 },
-    visitGrid: {
-      display: "grid",
-      gridTemplateColumns: "1fr",
-      gap: 18,
-      alignItems: "stretch",
-      marginTop: 18,
-    },
-    visitCard: {
-      borderRadius: 18,
-      padding: 18,
-      background: "linear-gradient(180deg, rgba(15,23,42,0.9), rgba(15,23,42,0.55))",
-      border: "1px solid rgba(148,163,184,0.28)",
-      boxShadow: "0 22px 60px rgba(0,0,0,0.38)",
-      display: "grid",
-      gap: 14,
-    },
-    visitRow: {
-      display: "flex",
-      gap: 12,
-      alignItems: "center",
-      color: "#cbd5e1",
+    panelTitle: { margin: 0, fontSize: 16, fontWeight: 800, color: "#f8fafc" },
+    panelList: { margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 10 },
+    panelItem: {
       fontSize: 13,
+      color: "#cbd5e1",
+      border: "1px solid rgba(148,163,184,0.22)",
+      borderRadius: 10,
+      padding: "9px 10px",
+      background: "rgba(15,23,42,0.5)",
     },
-    visitIcon: {
-      height: 36,
-      width: 36,
-      borderRadius: 12,
-      background: "rgba(71,85,105,0.28)",
+    panelVisualGrid: {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: 10,
+    },
+    panelVisual: {
+      borderRadius: 10,
+      border: "1px solid rgba(148,163,184,0.2)",
+      background: "linear-gradient(160deg, rgba(15,23,42,0.75), rgba(30,64,175,0.32))",
+      padding: 10,
+      textAlign: "center",
+      minHeight: 82,
       display: "grid",
       placeItems: "center",
-      fontSize: 18,
+      color: "#dbeafe",
+      fontWeight: 800,
+      fontSize: 12,
+      lineHeight: 1.3,
     },
-    marquee: {
-      display: "flex",
-      gap: 28,
-      overflow: "hidden",
-      maskImage: "linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent)",
-      WebkitMaskImage: "linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent)",
-      borderTop: "1px dashed rgba(148,163,184,0.2)",
-      borderBottom: "1px dashed rgba(148,163,184,0.2)",
-      padding: "12px 0",
+    section: { paddingTop: isMobile ? 28 : 42 },
+    sectionTitle: { margin: 0, fontSize: isMobile ? 22 : 30, fontWeight: 900, color: "#f8fafc" },
+    sectionSub: { marginTop: 8, marginBottom: 0, color: "#94a3b8", fontSize: isMobile ? 13 : 15 },
+    grid4: {
       marginTop: 16,
+      display: "grid",
+      gridTemplateColumns: isMobile ? "1fr" : isTablet ? "repeat(2, 1fr)" : "repeat(4, 1fr)",
+      gap: 14,
     },
-    section: { padding: isMobile ? "32px 0" : "44px 0" },
-    sectionTitle: { fontSize: isMobile ? 22 : 28, fontWeight: 900, marginBottom: 12 },
-    sectionSub: { color: "#93a4c3", marginBottom: 16, fontSize: isMobile ? 13 : 14 },
-    aboutImg: {
-      width: "100%",
+    card: {
+      borderRadius: 14,
+      padding: 14,
+      border: "1px solid rgba(148,163,184,0.2)",
+      background: "linear-gradient(180deg, rgba(30,41,59,0.55), rgba(15,23,42,0.5))",
+      boxShadow: "0 16px 38px rgba(0,0,0,0.28)",
+      height: "100%",
+    },
+    cardIcon: { fontSize: 22 },
+    cardTitle: { margin: "10px 0 6px 0", fontSize: 16, fontWeight: 800, color: "#f8fafc" },
+    cardText: { margin: 0, fontSize: 13, lineHeight: 1.55, color: "#cbd5e1" },
+    strip: {
+      marginTop: 26,
       borderRadius: 16,
-      height: isMobile ? 220 : 320,
-      objectFit: "cover",
-      boxShadow: "0 20px 50px rgba(0,0,0,0.35)",
+      border: "1px solid rgba(251,146,60,0.3)",
+      background: "linear-gradient(90deg, rgba(194,65,12,0.24), rgba(234,88,12,0.16), rgba(30,64,175,0.2))",
+      padding: isMobile ? "16px 14px" : "20px 22px",
+      display: "flex",
+      flexDirection: isMobile ? "column" : "row",
+      gap: 10,
+      alignItems: isMobile ? "flex-start" : "center",
+      justifyContent: "space-between",
     },
-    footer: {
-      marginTop: 36,
-      padding: "22px 0",
-      color: "#8b9bb7",
-      borderTop: "1px solid rgba(148,163,184,0.18)",
-      fontSize: 14,
-      textAlign: "center",
+    stripText: { margin: 0, fontSize: isMobile ? 15 : 19, fontWeight: 800, color: "#ffedd5" },
+    rolesGrid: {
+      marginTop: 16,
+      display: "grid",
+      gridTemplateColumns: isMobile ? "1fr" : "repeat(3, 1fr)",
+      gap: 14,
     },
-    whatsapp: {
+    roleBox: {
+      borderRadius: 14,
+      border: "1px solid rgba(148,163,184,0.2)",
+      background: "rgba(15,23,42,0.55)",
+      padding: 14,
+    },
+    roleHead: { margin: 0, fontSize: 15, fontWeight: 900, color: "#f8fafc" },
+    roleLine: { marginTop: 7, color: "#cbd5e1", fontSize: 13, lineHeight: 1.5 },
+    stack: {
+      marginTop: 16,
+      display: "grid",
+      gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)",
+      gap: 12,
+    },
+    stackItem: {
+      borderRadius: 12,
+      border: "1px dashed rgba(148,163,184,0.35)",
+      padding: "11px 12px",
+      background: "rgba(2,6,23,0.35)",
+      fontSize: 13,
+      color: "#dbeafe",
+    },
+    stackTitle: { color: "#fbbf24", fontWeight: 800 },
+    footerBlock: {
+      marginTop: 30,
+      marginBottom: 12,
+      borderRadius: 16,
+      border: "1px solid rgba(148,163,184,0.24)",
+      background: "linear-gradient(180deg, rgba(15,23,42,0.75), rgba(2,6,23,0.75))",
+      padding: isMobile ? 14 : 18,
+      display: "grid",
+      gap: 10,
+    },
+    footerTitle: { margin: 0, fontSize: isMobile ? 18 : 22, fontWeight: 900 },
+    footerMeta: { margin: 0, fontSize: 13, color: "#cbd5e1" },
+    footerNote: { marginTop: 2, marginBottom: 0, fontSize: 12, color: "#94a3b8" },
+    floatWa: {
       position: "fixed",
       right: 16,
       bottom: 16,
-      height: 62,
-      width: 62,
-      borderRadius: "50%",
-      background: "#25D366",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      color: "white",
-      fontWeight: 800,
-      boxShadow: "0 24px 60px rgba(37,211,102,0.5)",
-      cursor: "pointer",
-      textDecoration: "none",
-      animation: "pulse 2.2s infinite",
       zIndex: 60,
-    },
-    burger: {
-      display: isMobile ? "flex" : "none",
-      height: 40,
-      width: 44,
-      alignItems: "center",
-      justifyContent: "center",
-      border: "1px solid rgba(148,163,184,0.3)",
-      borderRadius: 10,
-      background: "#fff",
-      cursor: "pointer",
-      boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
+      height: 56,
+      width: 56,
+      borderRadius: "50%",
+      textDecoration: "none",
+      background: "#25D366",
+      display: "grid",
+      placeItems: "center",
+      color: "#fff",
+      boxShadow: "0 18px 38px rgba(37,211,102,0.45)",
     },
   };
 
-  const highlightCards = [
+  const capabilities = [
+    {
+      icon: "🧑‍💼",
+      title: "Handle Customer Enquiries",
+      text: "Track enquiry, quotation, and follow-up in one place. No missed customer.",
+    },
     {
       icon: "🛠️",
-      title: "On-Demand Service",
-      text: "Quick pick-up, doorstep delivery and live job card tracking.",
-      glow: "linear-gradient(135deg, rgba(14,165,233,0.6), rgba(129,140,248,0.1))",
+      title: "Run Daily Service Work",
+      text: "Create job cards, update status, and share invoice/updates quickly.",
     },
     {
-      icon: "💡",
-      title: "Transparent Pricing",
-      text: "Upfront estimates, genuine spares and no surprise billing.",
-      glow: "linear-gradient(135deg, rgba(192,132,252,0.6), rgba(244,114,182,0.12))",
+      icon: "📦",
+      title: "Manage Stock Movement",
+      text: "See in-stock, transfer, and booked vehicles with branch visibility.",
     },
     {
-      icon: "⚡",
-      title: "EV Expertise",
-      text: "Certified EV bays, diagnostics and charging guidance.",
-      glow: "linear-gradient(135deg, rgba(45,212,191,0.6), rgba(56,189,248,0.12))",
-    },
-    {
-      icon: "🤝",
-      title: "Relationship First",
-      text: "Personal advisors, loyalty rewards and custom finance help.",
-      glow: "linear-gradient(135deg, rgba(248,113,113,0.6), rgba(251,191,36,0.12))",
+      icon: "📊",
+      title: "Know Branch Performance",
+      text: "Owner gets collection and activity view to make quick business decisions.",
     },
   ];
 
-  const modelCards = [
+  const roles = [
     {
-      name: "Honda Shine",
-      badge: "Hot Seller",
-      price: "Starts Rs 87K",
-      range: "65 kmpl city mileage",
-      image: "https://imgd.aeplcdn.com/664x374/n/cw/ec/1/versions/honda-shine-drum1751549564957.jpg?q=80",
+      title: "Owner",
+      text: "View collections, analytics, branch performance, catalog and configuration from one place.",
     },
     {
-      name: "TVS iQube ST",
-      badge: "EV Ready",
-      price: "Starts Rs 1.24L",
-      range: "145 km certified range",
-      image: "https://www.tvsmotor.com/electric-scooters/tvs-iqube/-/media/Vehicles/Feature/Iqube/Variant/TVS-iQube/Vehicle-Highlights/Ride-In-style/v-tg-matte.webp",
+      title: "Backend",
+      text: "Manage users, assign branches, monitor quotation/job card flow and keep records clean.",
     },
     {
-      name: "Yamaha MT-15",
-      badge: "Performance",
-      price: "Starts Rs 1.67L",
-      range: "155 cc - Liquid cooled",
-      image: "https://imgd.aeplcdn.com/664x374/n/bw/models/colors/yamaha-select-model-metallic-black-2023-1680847548270.png?q=80",
+      title: "Staff",
+      text: "Create quotations and job cards faster, update stock movement, and close daily work reliably.",
     },
   ];
 
-  const journeySteps = [
-    {
-      stage: "Discover",
-      copy: "Browse 40+ two-wheelers, compare on-road pricing and explore EMI calculators online.",
-    },
-    {
-      stage: "Experience",
-      copy: `Instant test rides scheduled from your nearest ${orgName} experience center.`,
-    },
-    {
-      stage: "Purchase",
-      copy: "Paperwork, insurance and delivery handled in a single sitting with digital updates.",
-    },
-    {
-      stage: "Care",
-      copy: "Scheduled service reminders, free health checks and priority support for loyal riders.",
-    },
+  const stack = [
+    ["Quotation", "Fast quote + pending case reopen + follow-up updates"],
+    ["Job Card", "Pre-service to post-service with print + WhatsApp flow"],
+    ["Bookings", "Search, status updates and branch-level operations"],
+    ["Stock Update", "Movement logs, transfer flow and current stock visibility"],
+    ["Vehicle Catalog", "Owner-specific company/model/variant data source"],
+    ["Analytics", "Daily collections and operational conversion signals"],
   ];
 
-  const reviewList = [
-    { name: "Aarav Sharma", rating: 5, time: "2 days ago", text: "Smooth booking process and quick delivery. Staff was very helpful throughout." },
-    { name: "Priya Nair", rating: 4.5, time: "1 week ago", text: "Good service quality, reasonable pricing. Will come back for servicing." },
-    { name: "Rohit Verma", rating: 4, time: "3 weeks ago", text: "Test ride arranged instantly, paperwork was quick and hassle-free." },
-    { name: "Ananya Iyer", rating: 5, time: "yesterday", text: "Transparent pricing and genuine accessories - very satisfied!" },
-    { name: "Vikram Rao", rating: 4.5, time: "4 days ago", text: "Service center turnaround was quick and professional." },
-    { name: "Sneha Kulkarni", rating: 4, time: "5 days ago", text: "Friendly staff, but the waiting area could be improved." },
-  ];
+  const contactHref = "/contact";
+  const whatsappNumber = "919019844809";
+  const whatsAppHref =
+    `https://wa.me/${whatsappNumber}?text=` +
+    encodeURIComponent(
+      `Hi ${orgName}, I want a demo for my showroom.`
+    );
 
   return (
-    <div style={styles.root}>
-      <style>{`
-        @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.06)} }
-        @keyframes scrollX { from{ transform: translateX(0) } to{ transform: translateX(-50%) } }
-        @keyframes slideGlow { 0%,100%{ opacity:.6 } 50%{ opacity:1 } }
-        .tilt:hover { transform: perspective(900px) rotateX(3deg) rotateY(-3deg); box-shadow: 0 16px 60px rgba(0,0,0,.5) }
-        .cta:hover { transform: translateY(-1px); box-shadow: 0 14px 36px rgba(0,0,0,.35) }
-        .marquee-track { display:flex; gap:28px; width:max-content; animation: scrollX 24s linear infinite }
-      `}</style>
-
-      {/* Hide the internal Home navbar on mobile to avoid duplicate headers/drawers */}
-      {!isMobile && (
-        <div style={styles.navWrap}>
-          <div style={{ ...styles.container, ...styles.nav }}>
-            <div style={styles.logo}>MOTERA</div>
-            <button type="button" style={styles.burger} onClick={() => document.getElementById("offerings")?.scrollIntoView({ behavior: "smooth" })}>
-              <div style={{ display: "grid", gap: 4 }}>
-                <span style={{ height: 2, width: 20, background: "#131417", display: "block" }} />
-                <span style={{ height: 2, width: 16, background: "#131417", display: "block" }} />
-                <span style={{ height: 2, width: 20, background: "#131417", display: "block" }} />
-              </div>
-            </button>
-          </div>
-        </div>
-      )}
-
+    <div style={styles.page}>
       <div style={styles.container}>
-        <section style={styles.heroWrap} role="img" aria-label="Motorcycle hero">
-          <div style={styles.heroImg} />
-          <div style={styles.heroAurora} />
-          <div style={styles.heroNoise} />
-          <div style={styles.heroOverlay} />
-
-          <div style={styles.heroContent}>
-            <div>
-              <h1 style={styles.heroTitle}>Ride Bold. Service Smart. Save More.</h1>
-              <div style={styles.heroUnderline} />
-              <p style={styles.heroSub}>
-                Bengaluru's multi-brand hub for bikes and scooters - transparent pricing, expert service and genuine spares with fast turnaround.
-              </p>
-
-              <div style={styles.ctaDock}>
-                <button
-                  className="cta"
-                  style={styles.ctaPrimary}
-                  onClick={() => document.getElementById("enquiry")?.scrollIntoView({ behavior: "smooth" })}
-                >Book a Test Ride</button>
-                <button
-                  className="cta"
-                  style={styles.ctaGhost}
-                  onClick={() => document.getElementById("products")?.scrollIntoView({ behavior: "smooth" })}
-                >Browse Products</button>
-                <span style={{ color: "#93a4c3", fontSize: 12 }}>No spam - Instant assistance</span>
-              </div>
+        <section style={styles.hero}>
+          <div style={styles.heroGlow} />
+          <div style={{ position: "relative", zIndex: 2 }}>
+            <div style={styles.badgeRow}>
+              <span style={styles.badge}>Built for Multi-Brand Two-Wheeler Showrooms</span>
+              <span style={styles.badge}>Operations + Follow-up + Collections</span>
+              <span style={styles.badge}>Owner-Controlled Configuration</span>
             </div>
-
-            <aside style={styles.heroRightCard} className="tilt">
-              <div style={{ display: "grid", gap: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontWeight: 800 }}>Today's Highlights</span>
-                  <span style={{ fontSize: 12, color: "#93a4c3" }}>Live</span>
-                </div>
-                <div style={styles.stats}>
-                  {[{ k: "Happy Riders", v: "25k+" }, { k: "Avg. Rating", v: "4.7★" }, { k: "Genuine Parts", v: "100%" }].map((stat) => (
-                    <div key={stat.k} style={styles.statCard}>
-                      <div style={{ fontSize: 18, fontWeight: 900 }}>{stat.v}</div>
-                      <div style={{ fontSize: 12, color: "#9fb0cf" }}>{stat.k}</div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ fontSize: 12, color: "#9fb0cf" }}>
-                  Trusted across Bengaluru - quick service, transparent costs and genuine spares.
-                </div>
-              </div>
-            </aside>
-          </div>
-
-          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0 }}>
-            <div style={{ ...styles.container, ...styles.marquee }}>
-              <div className="marquee-track">
-                {["Honda","TVS","Yamaha","Bajaj","Hero","Ather","KTM","Royal Enfield","Honda","TVS","Yamaha","Bajaj","Hero","Ather","KTM","Royal Enfield"].map((brand, index) => (
-                  <span key={`${brand}-${index}`} style={{ fontWeight: 900, color: "#cbd5e1" }}>{brand}</span>
-                ))}
-              </div>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <div style={styles.container}>
-        <section style={styles.section}>
-          <h2 style={styles.sectionTitle}>Why Riders Choose {orgName}</h2>
-          <p style={styles.sectionSub}>A premium dealership journey built on trust, transparency and tech-enabled service.</p>
-
-          <div style={styles.highlightGrid}>
-            {highlightCards.map((card) => (
-              <div key={card.title} style={styles.highlightCard} className="tilt">
-                <span style={{ ...styles.highlightGlow, background: card.glow }} />
-                <div style={{ position: "relative", display: "grid", gap: 12 }}>
-                  <span style={styles.highlightIcon} aria-hidden>{card.icon}</span>
-                  <h3 style={styles.highlightTitle}>{card.title}</h3>
-                  <p style={styles.highlightText}>{card.text}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      </div>
-
-      <div style={styles.container}>
-        <section style={{ ...styles.section, paddingTop: 0 }}>
-          <div style={styles.ribbon}>
-            <div>
-              <div style={styles.ribbonText}>Upgrade your ride with launch offers and instant delivery slots.</div>
-              <p style={styles.ribbonSub}>
-                Speak with an advisor now - curated vehicle options, EMI plans and service packages shared in minutes.
-              </p>
-            </div>
-            <Link to="/contact" style={styles.ribbonCta}>Contact {orgName}</Link>
-          </div>
-        </section>
-      </div>
-
-      <div style={styles.container}>
-        <section style={styles.section} id="offerings">
-          <h2 style={styles.sectionTitle}>We Do - We Offer - We Prefer</h2>
-          <p style={styles.sectionSub}>End-to-end dealership services focused on sales, service, safety and genuine spares.</p>
-
-          <div style={styles.grid3}>
-            {[
-              {
-                title: "Sales",
-                text: "Latest multi-branded bikes and EVs with on-road prices and flexible EMI options.",
-              },
-              {
-                title: "Service",
-                text: "Multi-point inspection, maintenance and quick turnaround by certified technicians.",
-              },
-              {
-                title: "Safety",
-                text: "Ride assured with genuine spares, helmets and curated accessories.",
-              },
-            ].map((card) => (
-              <div key={card.title} style={styles.cardWrap}>
-                <article style={styles.card} className="tilt">
-                  <h3 style={{ marginTop: 4, color: "#e2e8f0" }}>{card.title}</h3>
-                  <p style={{ color: "#cbd5e1" }}>{card.text}</p>
-                </article>
-              </div>
-            ))}
-          </div>
-        </section>
-      </div>
-
-      <div style={styles.container}>
-        <section style={styles.section} id="products">
-          <h2 style={styles.sectionTitle}>Featured Two-Wheelers</h2>
-          <p style={styles.sectionSub}>Handpicked machines ready for immediate delivery with finance and exchange support.</p>
-
-          <div style={styles.modelsGrid}>
-            {modelCards.map((item) => (
-              <article key={item.name} style={styles.modelCard} className="tilt">
-                <span style={styles.modelBadge}>{item.badge}</span>
-                <div style={styles.modelImageWrap}>
-                  <img src={item.image} alt={item.name} style={styles.modelImage} />
-                </div>
-                <h3 style={styles.modelTitle}>{item.name}</h3>
-                <div style={styles.modelMeta}>
-                  <span>{item.price}</span>
-                  <span>{item.range}</span>
-                </div>
-                <Link to="/quotation" style={styles.modelCta}>Get On-Road Price  &rarr;</Link>
-              </article>
-            ))}
-          </div>
-        </section>
-      </div>
-
-      <div style={styles.container}>
-        <section style={styles.section}>
-          <h2 style={styles.sectionTitle}>Your {orgName} Journey</h2>
-          <p style={styles.sectionSub}>We stay with you at every milestone - from first test ride to scheduled service.</p>
-
-          <div style={styles.journeyGrid}>
-            {journeySteps.map((step) => (
-              <article key={step.stage} style={styles.journeyCard}>
-                <div style={styles.journeyMarker}>
-                  <span style={styles.journeyDot} />
-                  <div style={styles.journeyLine} />
-                </div>
-                <h3 style={styles.journeyStage}>{step.stage}</h3>
-                <p style={styles.journeyText}>{step.copy}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-      </div>
-
-      <div style={styles.container}>
-        <section style={styles.section} id="enquiry">
-          <h2 style={styles.sectionTitle}>Visit & Connect</h2>
-          <p style={styles.sectionSub}>Book a callback or reach the {orgName} team directly.</p>
-
-          <div style={styles.visitGrid}>
-            <aside style={styles.visitCard}>
-              <div style={{ display: "grid", gap: 12 }}>
-                <div style={styles.visitRow}>
-                  <span style={styles.visitIcon}>✉️</span>
-                  <span>{CONTACT_EMAIL || "contact@motera.com"}</span>
-                </div>
-                <div style={styles.visitRow}>
-                  <span style={styles.visitIcon}>🕒</span>
-                  <span>{BUSINESS_HOURS}</span>
-                </div>
-              </div>
-
-              <div style={{ borderTop: "1px solid rgba(148,163,184,0.22)", paddingTop: 14, display: "grid", gap: 10 }}>
-                <strong style={{ color: "#e2e8f0" }}>Quick Links</strong>
-                <Link to="/bookingform" style={{ color: "#93c5fd", textDecoration: "none", fontWeight: 800 }}>Book a Service Slot  &rarr;</Link>
-                <Link to="/jobcard" style={{ color: "#93c5fd", textDecoration: "none", fontWeight: 800 }}>Create Job Card  &rarr;</Link>
-                <Link to="/quotation" style={{ color: "#93c5fd", textDecoration: "none", fontWeight: 800 }}>Request Quotation  &rarr;</Link>
-              </div>
-            </aside>
-          </div>
-        </section>
-      </div>
-
-      <div style={styles.container}>
-        <section
-          style={{ ...styles.section, display: "grid", gridTemplateColumns: aboutGrid, gap: 18, alignItems: "center" }}
-          id="about"
-        >
-          <div>
-            <h2 style={styles.sectionTitle}>About {orgName}</h2>
-            <p style={styles.sectionSub}>
-              {orgName} began in 2022 with one compact outlet and a promise to make premium two-wheelers and transparent servicing accessible to every rider in Bengaluru.
-              In just a few years we have grown into a multi-brand network that blends curated bikes, quick finance approvals and certified workshops equipped for EV diagnostics.
-              Our rider-first crew keeps the journey personal with doorstep pick-ups, real-time updates and a culture that treats every delivery like day one.
+            <h1 style={styles.title}>
+              MOTERA is a <span style={styles.titleEm}>Showroom Operations Software</span>
+            </h1>
+            <p style={styles.subtitle}>
+              Motera is made for two-wheeler showrooms. Your team can handle quotation, job card,
+              bookings, stock updates, follow-up and daily tracking from one simple software.
             </p>
-            <Link to="/about" style={{ color: "#93c5fd", textDecoration: "none", fontWeight: 900 }}>Discover Our Story  &rarr;</Link>
+            <div style={styles.ctaRow}>
+              <Link to={contactHref} style={styles.ctaPrimary}>Request Demo</Link>
+              <Link to="/register" style={styles.ctaGhost}>Start Trial</Link>
+              <span style={{ fontSize: 12, color: "#94a3b8" }}>Simple setup for single branch and multi-branch showrooms</span>
+            </div>
           </div>
-          <img
-            style={styles.aboutImg}
-            src="/about-bike.jpg"
-            alt="Rider on a motorcycle"
-          />
+
+          <aside style={{ ...styles.heroPanel, position: "relative", zIndex: 2 }}>
+            <h3 style={styles.panelTitle}>See what Motera does in simple way</h3>
+            <div style={styles.panelVisualGrid}>
+              <div style={styles.panelVisual}>🧾<br />Quotation &<br />Follow-up</div>
+              <div style={styles.panelVisual}>🔧<br />Job Card &<br />Service Flow</div>
+              <div style={styles.panelVisual}>🏬<br />Branch &<br />Staff Access</div>
+              <div style={styles.panelVisual}>📈<br />Daily Tracking &<br />Reports</div>
+            </div>
+            <ul style={styles.panelList}>
+              <li style={styles.panelItem}>1. Save customer details and track pending cases</li>
+              <li style={styles.panelItem}>2. Generate quotation and job card quickly</li>
+              <li style={styles.panelItem}>3. Control access branch-wise for team members</li>
+              <li style={styles.panelItem}>4. Monitor daily operations from owner dashboard</li>
+            </ul>
+            <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>
+              Goal: less manual work, better follow-up, and faster daily execution.
+            </p>
+          </aside>
+        </section>
+
+        <section style={styles.section}>
+          <h2 style={styles.sectionTitle}>What Motera Does For Showrooms</h2>
+          <p style={styles.sectionSub}>
+            Easy to understand. Easy to use. Built for daily showroom work.
+          </p>
+          <div style={styles.grid4}>
+            {capabilities.map((item) => (
+              <article key={item.title} style={styles.card}>
+                <div style={styles.cardIcon}>{item.icon}</div>
+                <h3 style={styles.cardTitle}>{item.title}</h3>
+                <p style={styles.cardText}>{item.text}</p>
+              </article>
+            ))}
+          </div>
+
+          <div style={styles.strip}>
+            <p style={styles.stripText}>
+              If your team uses WhatsApp + Sheets + manual notes, Motera puts everything in one place.
+            </p>
+            <Link to={contactHref} style={styles.ctaGhost}>Talk to Motera Team</Link>
+          </div>
+        </section>
+
+        <section style={styles.section}>
+          <h2 style={styles.sectionTitle}>Role-Based, Not One-Size-Fits-All</h2>
+          <p style={styles.sectionSub}>
+            Every user sees only what they need to operate.
+          </p>
+          <div style={styles.rolesGrid}>
+            {roles.map((r) => (
+              <article key={r.title} style={styles.roleBox}>
+                <h3 style={styles.roleHead}>{r.title}</h3>
+                <p style={styles.roleLine}>{r.text}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section style={styles.section}>
+          <h2 style={styles.sectionTitle}>Daily Operational Stack</h2>
+          <p style={styles.sectionSub}>
+            Core modules used by multi-brand two-wheeler teams every day.
+          </p>
+          <div style={styles.stack}>
+            {stack.map(([title, desc]) => (
+              <div key={title} style={styles.stackItem}>
+                <span style={styles.stackTitle}>{title}:</span> {desc}
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section style={styles.section}>
+          <div style={styles.footerBlock}>
+            <h2 style={styles.footerTitle}>Bring MOTERA to Your Showroom</h2>
+            <p style={styles.footerMeta}>
+              Demo-driven onboarding for two-wheeler multi-brand dealerships.
+            </p>
+            <p style={styles.footerMeta}>Business Hours: {BUSINESS_HOURS}</p>
+            <p style={styles.footerMeta}>Email: {CONTACT_EMAIL || "kumarmar869@gmail.com"}</p>
+            <p style={styles.footerNote}>
+              Need branch-wise setup, role permissions and template alignment? Contact us and we will configure it with your process.
+            </p>
+            <div style={{ ...styles.ctaRow, marginTop: 4 }}>
+              <Link to={contactHref} style={styles.ctaPrimary}>Get Implementation Plan</Link>
+              <a href={whatsAppHref} target="_blank" rel="noreferrer" style={styles.ctaGhost}>Message on WhatsApp</a>
+            </div>
+          </div>
         </section>
       </div>
 
-      <div style={styles.container}>
-        <section style={styles.section} id="reviews">
-          <h2 style={styles.sectionTitle}>Google Reviews</h2>
-          <p style={styles.sectionSub}>What our happy riders say about us</p>
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: `repeat(${reviewCols}, 1fr)` ,
-              gap: 18,
-            }}
-          >
-            {reviewList.map((review) => {
-              const fullStars = Math.floor(review.rating);
-              const hasHalf = review.rating % 1 !== 0;
-              return (
-                <div
-                  key={review.name}
-                  style={{
-                    borderRadius: 16,
-                    padding: 16,
-                    background: "linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02))",
-                    border: "1px solid rgba(148,163,184,0.22)",
-                    boxShadow: "0 12px 38px rgba(0,0,0,0.3)",
-                    textAlign: "left",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
-                    <div
-                      style={{
-                        width: 44,
-                        height: 44,
-                        borderRadius: "50%",
-                        background: "linear-gradient(135deg,#fdf2f8,#eef2ff)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 20,
-                        marginRight: 10,
-                      }}
-                    >
-                      👤
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 800, fontSize: 14, color: "#e2e8f0" }}>{review.name}</div>
-                      <div style={{ fontSize: 12, color: "#9fb0cf" }}>{review.time}</div>
-                    </div>
-                  </div>
-
-                  <div style={{ color: "#fbbf24", fontSize: 16, marginBottom: 6 }}>
-                    {"★".repeat(fullStars)}
-                    {hasHalf && "½"}
-                    {"☆".repeat(5 - fullStars - (hasHalf ? 1 : 0))}
-                    <span style={{ marginLeft: 6, color: "#9fb0cf", fontSize: 12 }}>
-                      {review.rating.toFixed(1)}
-                    </span>
-                  </div>
-
-                  <div style={{ fontWeight: 800, color: "#e2e8f0", fontSize: 13, marginBottom: 4 }}>
-                    {review.rating >= 4.5 ? "Excellent" : "Good"}
-                  </div>
-                  <div style={{ fontSize: 13, color: "#cbd5e1" }}>{review.text}</div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      </div>
-
-      <div style={styles.container}>
-        <footer style={styles.footer}>
-          <div>© {new Date().getFullYear()} {orgName}. All rights reserved.</div>
-        </footer>
-      </div>
-
-      <Link
-        style={styles.whatsapp}
-        to="/contact"
-        aria-label={`Contact ${orgName}`}
-        title={`Contact ${orgName}`}
-      >
-        <FaWhatsapp size={28} />
-      </Link>
+      <a href={whatsAppHref} target="_blank" rel="noreferrer" style={styles.floatWa} aria-label="Chat on WhatsApp">
+        <FaWhatsapp size={30} />
+      </a>
     </div>
   );
 }

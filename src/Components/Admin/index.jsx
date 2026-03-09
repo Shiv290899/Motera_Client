@@ -27,21 +27,16 @@ export default function Admin() {
   ) : null;
   const items = [
     // 1) Quotations, 2) Job Cards, 3) Bookings
-    { key: "quotations", label: "Quotations", children: <Quotations /> },
-    { key: "jobcards", label: "Job Cards", children: <Jobcards /> },
-    { key: "bookings", label: "Bookings", children: <Bookings /> },
-    { key: "vehiclesearch", label: "Vehicle Search", children: <VehicleSearch /> },
+
     // 4) Stock Update, 5) In-Stock Update
-   { key: 'stock', label: 'Stock Movements', children: <StockUpdate /> },
-       { key: 'instock', label: 'Display Vehicles', children: <InStockUpdate /> },
-    { key: 'collections', label: 'Daily Collections', children: <AdminDailyCollections /> },
+  
     // 6) Branches, 7) Users, 8) Announcements
     { key: "branches", label: "Branches", children: <Branches /> },
     { key: "users", label: "Users", children: <Users /> },
-    { key: 'vehiclecatalog', label: 'Vehicle Catalog', children: <VehicleCatalogManager /> },
+ 
     { key: "announcements", label: (<><style>{`@keyframes annPulse{0%{transform:scale(1);}60%{transform:scale(1.05);}100%{transform:scale(1);}}`}</style><span>Announcements<NewPill/></span></>), children: <Announcements /> },
     // 9) Analytics & Reports, 10) Branch-level Sales, 11) Multi-branch Compare, 12) Sales Performance
-    { key: "analytics", label: "Analytics", children: <Analytics /> },
+    
   ];
 
   return (

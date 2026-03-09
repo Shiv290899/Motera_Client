@@ -1,17 +1,14 @@
 import React from "react";
 import dayjs from "dayjs";
-import { Table, Button, Space, Modal, Form, Input, Select, message, Tag, Checkbox, Row, Col, Grid, InputNumber } from "antd";
+import { Table, Button, Space, Modal, Form, Input, Select, message, Tag, Checkbox, Row, Col, Grid, InputNumber, Popover } from "antd";
 import { listUsers, listUsersPublic, updateUser, deleteUser } from "../../apiCalls/adminUsers";
 import { listBranches } from "../../apiCalls/branches";
 import { exportToCsv } from "../../utils/csvExport";
 
 const ROLE_OPTIONS = [
-  { label: "Admin", value: "admin" },
   { label: "Owner", value: "owner" },
   { label: "Staff", value: "staff" },
   { label: "Mechanic", value: "mechanic" },
-  { label: "Call Boy", value: "callboy" },
-  { label: "Employees", value: "employees" },
   { label: "User", value: "user" },
   { label: "Backend", value: "backend" },
 ];
@@ -35,6 +32,8 @@ export default function Users({ readOnly = false }) {
   const [owners, setOwners] = React.useState([]);
   const [form] = Form.useForm();
   const roleValue = Form.useWatch("role", form);
+  const ownerBranchLimitValue = Form.useWatch("ownerBranchLimit", form);
+  const isOwnerRole = String(roleValue || "").toLowerCase() === "owner";
   const getRowId = React.useCallback((row) => row?.id || row?._id || row?.userId || null, []);
 
   // Quick filters
@@ -46,6 +45,23 @@ export default function Users({ readOnly = false }) {
   // Controlled pagination (client-side)
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(25);
+  const objectIdRe = /^[0-9a-fA-F]{24}$/;
+  const toId = (v) => {
+    if (!v) return undefined;
+    if (typeof v === "string") return v;
+    if (typeof v === "object") return String(v._id || v.id || "");
+    return String(v);
+  };
+  const resolveBranchId = React.useCallback((branchLike) => {
+    if (!branchLike) return undefined;
+    const raw = typeof branchLike === "object"
+      ? String(branchLike._id || branchLike.id || branchLike.name || "").trim()
+      : String(branchLike).trim();
+    if (!raw) return undefined;
+    if (objectIdRe.test(raw)) return raw;
+    const byName = branches.find((b) => String(b.name || "").trim().toLowerCase() === raw.toLowerCase());
+    return byName ? String(byName.id || byName._id || "") : undefined;
+  }, [branches]);
 
   const fetchBranches = React.useCallback(async () => {
     const res = await listBranches({ limit: 500, status: 'active' });
@@ -136,11 +152,9 @@ export default function Users({ readOnly = false }) {
       phone: row.phone,
       role: row.role,
       status: row.status,
-      jobTitle: row.jobTitle,
-      employeeCode: row.employeeCode,
-      primaryBranch: row.primaryBranch?._id || row.primaryBranch?.id || row.primaryBranch || undefined,
+      primaryBranch: resolveBranchId(row.primaryBranch),
       branches: Array.isArray(row.branches)
-        ? row.branches.map((b) => (typeof b === 'string' ? b : (b?._id || b?.id))).filter(Boolean)
+        ? row.branches.map((b) => resolveBranchId(b)).filter(Boolean)
         : undefined,
       canSwitchBranch: !!row.canSwitchBranch,
       ownerBranchLimit: row.ownerLimits?.branchLimit ?? undefined,
@@ -179,16 +193,26 @@ export default function Users({ readOnly = false }) {
   const onSubmit = async () => {
     try {
       const vals = await form.validateFields();
+      const primaryBranch = vals.primaryBranch || undefined;
+      const additionalBranches = Array.isArray(vals.branches)
+        ? vals.branches.filter((b) => b && b !== primaryBranch)
+        : [];
+      const assignedBranchIds = Array.from(new Set([...(primaryBranch ? [primaryBranch] : []), ...additionalBranches]));
+      const limitNum = vals.ownerBranchLimit == null ? undefined : Number(vals.ownerBranchLimit);
+      if (isOwnerRole && Number.isFinite(limitNum) && limitNum >= 0 && assignedBranchIds.length > limitNum) {
+        const errMsg = `Selected branches (${assignedBranchIds.length}) exceed owner branch limit (${limitNum})`;
+        form.setFields([{ name: "branches", errors: [errMsg] }]);
+        message.error(errMsg);
+        return;
+      }
       const payload = {
         name: vals.name,
         email: vals.email,
         ...(vals.phone ? { phone: vals.phone } : {}),
         role: vals.role,
         status: vals.status,
-        ...(vals.jobTitle ? { jobTitle: vals.jobTitle } : {}),
-        ...(vals.employeeCode ? { employeeCode: vals.employeeCode } : {}),
-        ...(vals.primaryBranch ? { primaryBranch: vals.primaryBranch } : {}),
-        ...(Array.isArray(vals.branches) ? { branches: vals.branches } : {}),
+        ...(primaryBranch ? { primaryBranch } : {}),
+        ...(Array.isArray(additionalBranches) ? { branches: additionalBranches } : {}),
         ...(vals.owner ? { owner: vals.owner } : {}),
         canSwitchBranch: !!vals.canSwitchBranch,
         ...(vals.ownerBranchLimit != null ? { ownerLimits: { branchLimit: vals.ownerBranchLimit } } : {}),
@@ -221,14 +245,73 @@ export default function Users({ readOnly = false }) {
     }
   };
 
-  const branchOptions = branches.map((b) => ({ label: b.name, value: b.id || b._id }));
+  const branchOptions = branches.map((b) => ({ label: b.name, value: String(b.id || b._id || "") })).filter((o) => o.value);
+  const branchNameById = React.useMemo(() => {
+    const m = new Map();
+    branches.forEach((b) => {
+      const id = String(b.id || b._id || "");
+      if (id) m.set(id, b.name || id);
+    });
+    return m;
+  }, [branches]);
+  const getBranchLabel = React.useCallback((branchLike) => {
+    if (!branchLike) return "—";
+    if (typeof branchLike === "object") {
+      return branchLike.name || branchNameById.get(String(branchLike._id || branchLike.id || "")) || "—";
+    }
+    return branchNameById.get(String(branchLike)) || String(branchLike);
+  }, [branchNameById]);
+  const renderBranchTags = React.useCallback((names = [], maxVisible = 2) => {
+    if (!names.length) return "—";
+    const visible = names.slice(0, maxVisible);
+    const hidden = names.slice(maxVisible);
+    return (
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        {visible.map((name) => (
+          <Tag key={name} color="blue" style={{ marginInlineEnd: 0 }}>
+            {name}
+          </Tag>
+        ))}
+        {hidden.length ? (
+          <Popover
+            trigger="click"
+            content={
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxWidth: 240 }}>
+                {hidden.map((name) => (
+                  <Tag key={`more-${name}`} color="blue" style={{ marginInlineEnd: 0 }}>
+                    {name}
+                  </Tag>
+                ))}
+              </div>
+            }
+          >
+            <Tag color="gold" style={{ cursor: "pointer", marginInlineEnd: 0 }}>+{hidden.length} more</Tag>
+          </Popover>
+        ) : null}
+      </div>
+    );
+  }, []);
 
   const columns = [
     { title: "Name", dataIndex: "name", key: "name", width: 160, ellipsis: true, sorter: (a, b) => a.name.localeCompare(b.name) },
     { title: "Email", dataIndex: "email", key: "email", width: 180, ellipsis: true },
     { title: "Phone", dataIndex: "phone", key: "phone", width: 110, ellipsis: true },
     { title: "Role", dataIndex: "role", key: "role", width: 100, render: (v) => <Tag color={v === 'admin' ? 'red' : v === 'owner' ? 'gold' : v === 'backend' ? 'purple' : v === 'mechanic' ? 'cyan' : v === 'staff' ? 'blue' : 'default'}>{v}</Tag> },
-    { title: "Primary Branch", key: "primaryBranch", width: 140, ellipsis: true, render: (_, r) => r.primaryBranch?.name || "—" },
+    { title: "Primary Branch", key: "primaryBranch", width: 140, ellipsis: true, render: (_, r) => getBranchLabel(r.primaryBranch) },
+    {
+      title: "Additional Branches",
+      key: "branches",
+      width: 280,
+      ellipsis: true,
+      render: (_, r) => {
+        const primaryId = toId(r.primaryBranch);
+        const names = (Array.isArray(r.branches) ? r.branches : [])
+          .filter((b) => toId(b) !== primaryId)
+          .map((b) => getBranchLabel(b))
+          .filter((n) => n && n !== "—");
+        return renderBranchTags(names, 2);
+      },
+    },
     { title: "Branch Limit", key: "branchLimit", width: 120, render: (_, r) => r?.ownerLimits?.branchLimit ?? "—" },
     { title: "Status", dataIndex: "status", key: "status", width: 90, render: (v) => (
       v === "active" ? <Tag color="green">Active</Tag> : v === "inactive" ? <Tag>Inactive</Tag> : <Tag color="orange">Suspended</Tag>
@@ -258,8 +341,6 @@ export default function Users({ readOnly = false }) {
       { key: 'phone', label: 'Phone' },
       { key: 'role', label: 'Role' },
       { key: 'status', label: 'Status' },
-      { key: 'jobTitle', label: 'Job Title' },
-      { key: 'employeeCode', label: 'Employee Code' },
       { key: 'primaryBranch', label: 'Primary Branch' },
       { key: 'branches', label: 'Additional Branches' },
       { key: 'lastLoginAt', label: 'Last Login' },
@@ -274,8 +355,6 @@ export default function Users({ readOnly = false }) {
         phone: u.phone,
         role: u.role,
         status: u.status,
-        jobTitle: u.jobTitle,
-        employeeCode: u.employeeCode,
         primaryBranch: (typeof u.primaryBranch === 'string' ? u.primaryBranch : u.primaryBranch?.name) || '',
         branches: branchNames,
         lastLoginAt: u.lastLoginAt,
@@ -323,7 +402,7 @@ export default function Users({ readOnly = false }) {
             optionFilterProp="label"
             value={branchFilter}
             onChange={(v) => setBranchFilter(v)}
-            options={branches.map((b) => ({ label: b.name, value: b.id }))}
+            options={branches.map((b) => ({ label: b.name, value: String(b.id || b._id || "") })).filter((o) => o.value)}
             style={{ width: 220 }}
           />
           <Button onClick={handleExportCsv}>Export CSV</Button>
@@ -331,6 +410,11 @@ export default function Users({ readOnly = false }) {
           <Button onClick={() => { setQText(""); setQ(""); setRoleFilter(undefined); setStatusFilter(undefined); setBranchFilter(undefined); }}>Reset</Button>
         </div>
       </div>
+      {isMobile ? (
+        <div style={{ marginBottom: 8 }}>
+          <Tag color="processing">Swipe left/right to view all columns</Tag>
+        </div>
+      ) : null}
       <Table
         rowKey={(r) => getRowId(r) || `${r.email || ''}-${r.phone || ''}-${r.name || ''}`}
         dataSource={items}
@@ -346,7 +430,9 @@ export default function Users({ readOnly = false }) {
           showTotal: (total, range) => `${range[0]}-${range[1]} of ${total}`,
         }}
         size={isMobile ? "small" : "middle"}
-        scroll={isMobile ? { x: 'max-content' } : undefined}
+        bordered
+        sticky
+        scroll={{ x: 1600 }}
       />
 
       <Modal
@@ -383,7 +469,7 @@ export default function Users({ readOnly = false }) {
                 <Select options={ROLE_OPTIONS} />
               </Form.Item>
             </Col>
-            {["staff", "mechanic", "employees", "callboy"].includes(String(roleValue || "").toLowerCase()) ? (
+            {["staff", "mechanic"].includes(String(roleValue || "").toLowerCase()) ? (
               <Col xs={24} sm={12}>
                 <Form.Item name="owner" label="Owner" rules={[{ required: true, message: "Owner is required" }]}>
                   <Select options={owners.map(o => ({ label: `${o.name} (${o.email})`, value: o._id }))} placeholder="Select owner" />
@@ -402,25 +488,39 @@ export default function Users({ readOnly = false }) {
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>
-              <Form.Item name="jobTitle" label="Job Title">
-                <Input placeholder="e.g., Sales Executive" />
-              </Form.Item>
-            </Col>
-
-            <Col xs={24} sm={12}>
-              <Form.Item name="employeeCode" label="Employee Code">
-                <Input placeholder="Unique within primary branch" />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12}>
-              <Form.Item name="primaryBranch" label="Primary Branch">
-                <Select allowClear options={branchOptions} placeholder="Select primary branch" />
+              <Form.Item
+                name="primaryBranch"
+                label="Primary Branch"
+                rules={isOwnerRole ? [{ required: true, message: "Primary Branch is required for owner assignment" }] : undefined}
+              >
+                <Select
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  options={branchOptions}
+                  placeholder="Select primary branch"
+                />
               </Form.Item>
             </Col>
 
             <Col span={24}>
-              <Form.Item name="branches" label="Additional Branches">
-                <Select mode="multiple" allowClear options={branchOptions} placeholder="Select additional branches" />
+              <Form.Item
+                name="branches"
+                label="Additional Branches"
+                extra={
+                  isOwnerRole && ownerBranchLimitValue != null
+                    ? `Total assigned (primary + additional) must be <= ${ownerBranchLimitValue}`
+                    : undefined
+                }
+              >
+                <Select
+                  mode="multiple"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  options={branchOptions}
+                  placeholder="Select additional branches"
+                />
               </Form.Item>
             </Col>
 

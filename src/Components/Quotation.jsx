@@ -364,6 +364,8 @@ export default function Quotation() {
   const [pendingItems, setPendingItems] = useState([]);
   const [pendingLoaded, setPendingLoaded] = useState(false);
   const [pendingAutoApply, setPendingAutoApply] = useState(null);
+  const pendingCacheRef = useRef({ key: "", at: 0 });
+  const PENDING_CACHE_TTL_MS = 60 * 1000;
   const [loadedQuotationMeta, setLoadedQuotationMeta] = useState(null);
 
   const ownerCfg = getOwnerConfig();
@@ -679,6 +681,7 @@ export default function Quotation() {
     [watchedBranch, defaultBranchName]
   );
   const isOwnerAdmin = ["owner", "admin", "superadmin"].includes(String(userRole || "").toLowerCase());
+  const pendingCacheKey = `${isOwnerAdmin ? "admin" : "scoped"}::${pendingBranch || "-"}`;
   
   const pendingCount = pendingLoaded ? pendingItems.length : null;
 
@@ -694,8 +697,14 @@ export default function Quotation() {
       '';
     let payload = {};
     try { payload = typeof payloadRaw === 'object' ? payloadRaw : JSON.parse(String(payloadRaw || '{}')); } catch { payload = {}; }
-    const fv = payload.formValues || payload.values || {};
-    const followUp = payload.followUp || payload.followup || {};
+    // Pending rows may store wrappers like { action, data: {...} } or { payload: {...} }.
+    const payloadCore =
+      (payload?.data && typeof payload.data === 'object' ? payload.data : null) ||
+      (payload?.payload && typeof payload.payload === 'object' ? payload.payload : null) ||
+      payload ||
+      {};
+    const fv = payloadCore.formValues || payloadCore.values || {};
+    const followUp = payloadCore.followUp || payloadCore.followup || {};
     const status = String(followUp.status || values.Status || values.status || 'pending').toLowerCase();
     const pick = (obj, keys) => {
       for (const k of keys) {
@@ -739,22 +748,81 @@ export default function Quotation() {
       );
       return d.isValid() ? d.format('DD-MM-YYYY HH:mm') : String(followUpUpdatedAtRaw);
     })();
+    const serialValue =
+      fv.serialNo ||
+      payloadCore?.serialNo ||
+      pick(values, ['Quotation No.', 'Quotation No', 'Quotation_No', 'QuotationNo', 'Quotation_ID', 'Quotation ID', 'Serial', 'QNo']) ||
+      '';
+    const nameValue =
+      fv.name ||
+      payloadCore?.followUp?.customer?.name ||
+      pick(values, ['Customer_Name', 'Customer Name', 'Customer_Nam', 'Name', 'Customer']) ||
+      '';
+    const mobileValue = String(
+      fv.mobile ||
+        payloadCore?.followUp?.customer?.mobile ||
+        pick(values, ['Mobile', 'Mobile Number', 'Mobile_No', 'Phone', 'Customer_Mobile']) ||
+        ''
+    )
+      .replace(/\D/g, '')
+      .slice(-10);
+    const companyValue = fv.company || payloadCore.company || values.Company || '';
+    const modelValue = fv.bikeModel || payloadCore.model || values.Model || '';
+    const variantValue = fv.variant || payloadCore.variant || values.Variant || '';
+    const branchValue = fv.branch || payloadCore.branch || values.Branch || values['Branch Name'] || '';
+    const addressValue = fv.address || values.Address || '';
+    const mergedPayload = {
+      ...payloadCore,
+      serialNo: payloadCore.serialNo || serialValue,
+      company: payloadCore.company || companyValue,
+      model: payloadCore.model || modelValue,
+      variant: payloadCore.variant || variantValue,
+      branch: payloadCore.branch || branchValue,
+      formValues: {
+        ...(payloadCore.formValues || {}),
+        serialNo: payloadCore?.formValues?.serialNo || serialValue,
+        name: payloadCore?.formValues?.name || nameValue,
+        mobile: payloadCore?.formValues?.mobile || mobileValue,
+        company: payloadCore?.formValues?.company || companyValue,
+        bikeModel: payloadCore?.formValues?.bikeModel || modelValue,
+        variant: payloadCore?.formValues?.variant || variantValue,
+        branch: payloadCore?.formValues?.branch || branchValue,
+        address: payloadCore?.formValues?.address || addressValue,
+      },
+      followUp: {
+        ...(payloadCore.followUp || {}),
+        customer: {
+          ...(payloadCore?.followUp?.customer || {}),
+          name: payloadCore?.followUp?.customer?.name || nameValue,
+          mobile: payloadCore?.followUp?.customer?.mobile || mobileValue,
+        },
+      },
+    };
     return {
-      serial: fv.serialNo || pick(values, ['Quotation No.', 'Quotation No', 'Quotation_ID', 'Quotation ID', 'Serial']) || '-',
-      name: fv.name || pick(values, ['Customer_Name', 'Customer Name', 'Name']) || '-',
-      mobile: String(fv.mobile || pick(values, ['Mobile', 'Mobile Number', 'Phone']) || '').replace(/\D/g, '').slice(-10),
-      vehicle: [fv.company || payload.company || values.Company, fv.bikeModel || payload.model || values.Model, fv.variant || payload.variant || values.Variant].filter(Boolean).join(' ') || '-',
-      branch: fv.branch || payload.branch || values.Branch || values['Branch Name'] || '-',
+      serial: serialValue || '-',
+      name: nameValue || '-',
+      mobile: mobileValue,
+      vehicle: [companyValue, modelValue, variantValue].filter(Boolean).join(' ') || '-',
+      branch: branchValue || '-',
       followUpAt,
       followUpUpdatedAt,
       followUpNotes: followUp.notes || values['Follow-up Notes'] || values['Follow Up Notes'] || values['Followup Notes'] || '',
       status,
-      payload,
+      payload: mergedPayload,
     };
   };
 
-  const loadPendingCases = async ({ silent = false } = {}) => {
+  const loadPendingCases = async ({ silent = false, force = false } = {}) => {
     if (!QUOT_GAS_URL) return;
+    const now = Date.now();
+    if (
+      !force &&
+      pendingLoaded &&
+      pendingCacheRef.current.key === pendingCacheKey &&
+      now - pendingCacheRef.current.at < PENDING_CACHE_TTL_MS
+    ) {
+      return;
+    }
     if (!silent) setPendingLoading(true);
     try {
       const base = { action: 'list', page: 1, pageSize: 500 };
@@ -766,6 +834,7 @@ export default function Quotation() {
       const pendingOnly = mapped.filter((r) => !r.status || r.status === 'pending');
       setPendingItems(pendingOnly);
       setPendingLoaded(true);
+      pendingCacheRef.current = { key: pendingCacheKey, at: Date.now() };
     } catch {
       setPendingItems([]);
       setPendingLoaded(true);
@@ -774,11 +843,29 @@ export default function Quotation() {
     }
   };
 
+  const upsertPendingFromSavedPayload = (savedPayload) => {
+    const normalized = normalizePendingRow({ payload: savedPayload, values: {} });
+    if (!normalized || !normalized.serial || normalized.serial === '-') return;
+    if (normalized.status && normalized.status !== "pending") return;
+    setPendingItems((prev) => {
+      const idx = prev.findIndex((p) => p.serial === normalized.serial);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = normalized;
+        return copy;
+      }
+      return [normalized, ...prev];
+    });
+    setPendingLoaded(true);
+    pendingCacheRef.current = { key: pendingCacheKey, at: Date.now() };
+  };
+
   useEffect(() => {
     setPendingItems([]);
     setPendingLoaded(false);
-    loadPendingCases({ silent: true });
-  }, [pendingBranch, isOwnerAdmin]);
+    pendingCacheRef.current = { key: pendingCacheKey, at: 0 };
+    loadPendingCases({ silent: true, force: true });
+  }, [pendingCacheKey]);
 
   useEffect(() => {
     setFittings((prev) => {
@@ -1379,6 +1466,7 @@ export default function Quotation() {
       payload,
     };
     setLoadedQuotationMeta({ serialNo: v.serialNo, savedAt, createdAt });
+    upsertPendingFromSavedPayload(payload);
     const outboxId = enqueueOutbox({ type: 'quot', data });
     setTimeout(async () => {
       try {
@@ -1784,7 +1872,9 @@ export default function Quotation() {
                       className="pending-trigger"
                       onClick={async () => {
                         setPendingOpen(true);
-                        await loadPendingCases();
+                        if (!pendingLoaded) {
+                          await loadPendingCases();
+                        }
                       }}
                     >
                       {pendingCount === null ? "PendingCases" : `PendingCases (${pendingCount})`}
@@ -1822,7 +1912,7 @@ export default function Quotation() {
                 onCancel={() => setPendingOpen(false)}
                 width={700}
                 footer={[
-                  <Button key="refresh" icon={<ReloadOutlined />} onClick={() => loadPendingCases()}>
+                  <Button key="refresh" icon={<ReloadOutlined />} onClick={() => loadPendingCases({ force: true })}>
                     Refresh
                   </Button>,
                   <Button key="close" type="primary" onClick={() => setPendingOpen(false)}>
@@ -1853,7 +1943,6 @@ export default function Quotation() {
                               if (!item?.payload) return;
                               setPendingAutoApply({ payload: item.payload, token: Date.now() });
                               setPendingOpen(false);
-                              setPendingItems((prev) => prev.filter((p) => p.serial !== item.serial));
                             }}
                           >
                             Open
@@ -2552,9 +2641,9 @@ export default function Quotation() {
 
                   <div>
                     <div style={{ fontWeight: 900, textAlign: "center", marginBottom: 4, fontSize: "14pt" }}>EMI DETAILS</div>
-                    <div style={{ display: "flex", gap: 8, justifyContent: "space-between", flexWrap: "wrap" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
                       {tenures.map((mo) => (
-                        <div key={mo} className="emibox" style={{ flex: 1, minWidth: 120 }}>
+                        <div key={mo} className="emibox" style={{ minWidth: 0 }}>
                           <div style={{ fontWeight: 700 }}>{mo} months</div>
                           <div style={{ fontWeight: 900 }}>{inr0(monthlyFor(onRoadPrice, downPayment, mo))}</div>
                         </div>
@@ -2596,9 +2685,9 @@ export default function Quotation() {
 
                         <div>
                           <div style={{ fontWeight: 900, textAlign: "center", marginBottom: 4, fontSize: "14pt" }}>EMI DETAILS</div>
-                          <div style={{ display: "flex", gap: 8, justifyContent: "space-between", flexWrap: "wrap" }}>
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
                             {tset.map((mo) => (
-                              <div key={mo} className="emibox" style={{ minWidth: 140 }}>
+                              <div key={mo} className="emibox" style={{ minWidth: 0 }}>
                                 <div style={{ fontWeight: 700 }}>{mo} months</div>
                                 <div style={{ fontWeight: 900 }}>
                                   {inr0(monthlyFor(ev.onRoadPrice || 0, ev.downPayment || 0, mo))}

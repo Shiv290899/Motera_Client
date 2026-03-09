@@ -1,0 +1,1 @@
+const r="9019844809",S="+91 90198 44809",s=t=>{const n=String(t).replace(/\D/g,"");return n?n.startsWith("91")?n:n.length===10?`91${n}`:n:null},a=(()=>{const t=s(r);return t?`tel:+${t}`:""})(),e=(()=>{const t=s(r);return t?`https://wa.me/${t}`:""})(),o="Mon-Sat: 9:00 AM - 8:30 PM - Sun: 9:00 AM - 2:30 PM",c="kumarmar869@gmail.com";export{o as B,c as C,S,a,e as b};

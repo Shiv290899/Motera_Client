@@ -1,9 +1,9 @@
-export const SALES_NUMBERS = [];
+export const SALES_NUMBERS = ["9019844809"];
 
-export const SALES_PRIMARY = null;
-export const SALES_SECONDARY = null;
+export const SALES_PRIMARY = "9019844809";
+export const SALES_SECONDARY = "";
 
-export const SALES_DISPLAY = "";
+export const SALES_DISPLAY = "+91 90198 44809";
 
 const normalizeTel = (num) => {
   const digits = String(num || "").replace(/\D/g, "");
@@ -24,4 +24,4 @@ export const SALES_WHATSAPP_LINK = (() => {
 })();
 
 export const BUSINESS_HOURS = "Mon-Sat: 9:00 AM - 8:30 PM - Sun: 9:00 AM - 2:30 PM";
-export const CONTACT_EMAIL = "hello@motera.com";
+export const CONTACT_EMAIL = "kumarmar869@gmail.com";

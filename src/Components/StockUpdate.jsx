@@ -48,10 +48,10 @@ const splitColors = (value) => {
 };
 
 const normalizeCatalogRow = (row = {}) => ({
-  company: pick(row, HEADERS.company),
-  model: pick(row, HEADERS.model),
-  variant: pick(row, HEADERS.variant),
-  color: pick(row, HEADERS.color),
+  company: String(pick(row, HEADERS.company) || "").toUpperCase(),
+  model: String(pick(row, HEADERS.model) || "").toUpperCase(),
+  variant: String(pick(row, HEADERS.variant) || "").toUpperCase(),
+  color: String(pick(row, HEADERS.color) || "").toUpperCase(),
 });
 
 // (no fallback loader)
@@ -95,6 +95,7 @@ export default function StockUpdate() {
   const [actingTransferId, setActingTransferId] = useState(null);
   const [actingMode, setActingMode] = useState(null);
   const normalizeKey = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]/g, '');
+  const toCaps = (s) => String(s || '').trim().toUpperCase();
 
   const currentUser = useMemo(() => {
     try { return JSON.parse(localStorage.getItem('user') || 'null') } catch { return null }
@@ -231,7 +232,7 @@ export default function StockUpdate() {
   }, [catalog, company, model, variant]);
 
   const colors = useMemo(
-    () => (catalogColors.length ? catalogColors : PRESET_COLORS.map((c) => c.name)),
+    () => (catalogColors.length ? catalogColors.map((c) => toCaps(c)) : PRESET_COLORS.map((c) => toCaps(c.name))),
     [catalogColors, PRESET_COLORS]
   );
 
@@ -241,20 +242,20 @@ export default function StockUpdate() {
   };
 
   const onCompany = (v) => {
-    const next = String(v || "").trim();
+    const next = toCaps(v);
     setCompany(next);
     setModel("");
     setVariant("");
     form.setFieldsValue({ company: next || undefined, model: undefined, variant: undefined, color: undefined });
   };
   const onModel = (v) => {
-    const next = String(v || "").trim();
+    const next = toCaps(v);
     setModel(next);
     setVariant("");
     form.setFieldsValue({ model: next || undefined, variant: undefined, color: undefined });
   };
   const onVariant = (v) => {
-    const next = String(v || "").trim();
+    const next = toCaps(v);
     setVariant(next);
     form.setFieldsValue({ variant: next || undefined, color: undefined });
   };
@@ -300,10 +301,10 @@ export default function StockUpdate() {
       const actionNow = action;
       const row = {
         Chassis_No: String(values.chassis || '').toUpperCase(),
-        Company: values.company || '',
-        Model: values.model || '',
-        Variant: values.variant || '',
-        Color: values.color || '',
+        Company: toCaps(values.company || ''),
+        Model: toCaps(values.model || ''),
+        Variant: toCaps(values.variant || ''),
+        Color: toCaps(values.color || ''),
         Action: actionNow,
         Target_Branch: actionNow === 'transfer' ? (values.targetBranch || '') : '',
         Return_To: actionNow === 'return' ? (values.returnTo || '') : '',
@@ -311,7 +312,32 @@ export default function StockUpdate() {
         Source_Branch: values.sourceBranch || '',
         Notes: String(values.notes || '').trim(),
       };
+      if (!editingId && String(actionNow || "").toLowerCase() === "add") {
+        const targetChassis = String(row.Chassis_No || "").trim().toUpperCase();
+        const targetBranch = String(row.Source_Branch || myBranch || "").trim().toUpperCase();
+        const duplicateLocal = (items || []).some((it) => {
+          const itAction = String(it?.action || "").toLowerCase();
+          const itTransferStatus = String(it?.transferStatus || "").toLowerCase();
+          const sameChassis = String(it?.chassis || "").trim().toUpperCase() === targetChassis;
+          const sameBranch =
+            String(it?.sourceBranch || "").trim().toUpperCase() === targetBranch;
+          const stillPresent = itAction === "add" || (itAction === "transfer" && itTransferStatus !== "admitted");
+          return sameChassis && sameBranch && stillPresent;
+        });
+        if (duplicateLocal) {
+          const msg = "Chassis already exists in this branch.";
+          setFormError(msg);
+          Modal.error({
+            title: "Duplicate Chassis Number",
+            content: msg,
+            okText: "OK",
+          });
+          message.warning(msg);
+          return;
+        }
+      }
       let rollbackItems = null;
+      const attemptedValues = { ...values };
       const tempId = `tmp-${Date.now()}`;
       const nowIso = new Date().toISOString();
       const optimisticRow = {
@@ -354,11 +380,19 @@ export default function StockUpdate() {
           let resp;
           if (editingId) {
             resp = await updateStock(editingId, row);
-            if (!(resp?.success ?? resp?.ok)) throw new Error(resp?.message || 'Update failed');
+            if (!(resp?.success ?? resp?.ok)) {
+              const e = new Error(resp?.message || 'Update failed');
+              e.code = Number(resp?.code || 0) || undefined;
+              throw e;
+            }
             message.success("Stock movement updated.");
           } else {
             resp = await createStock({ data: row, createdBy: user?.name || user?.email || 'user' });
-            if (!(resp?.success ?? resp?.ok)) throw new Error(resp?.message || 'Save failed');
+            if (!(resp?.success ?? resp?.ok)) {
+              const e = new Error(resp?.message || 'Save failed');
+              e.code = Number(resp?.code || 0) || undefined;
+              throw e;
+            }
             const saved = resp?.data || {};
             const savedMovementId = String(saved?.movementId || saved?._id || '').trim();
             if (savedMovementId) {
@@ -383,9 +417,21 @@ export default function StockUpdate() {
           if (actionNow === 'transfer') fetchPendingTransfers();
         } catch (err) {
           if (rollbackItems) setItems(rollbackItems);
+          const statusCode = Number(err?.code || err?.response?.status || err?.response?.data?.code || 0);
           const apiMessage = err?.response?.data?.message || err?.message || "Failed to save. Check configuration or network.";
           setFormError(apiMessage);
-          message.error(apiMessage);
+          if (statusCode === 409 || /chassis\s+already\s+exists/i.test(apiMessage)) {
+            setModalOpen(true);
+            form.setFieldsValue(attemptedValues);
+            Modal.error({
+              title: "Duplicate Chassis Number",
+              content: apiMessage || "This chassis already exists in this branch. Please check and try again.",
+              okText: "OK",
+            });
+            message.warning(apiMessage || "Chassis already exists in this branch.");
+          } else {
+            message.error(apiMessage);
+          }
         }
       })();
     } catch (err) {
@@ -995,7 +1041,7 @@ export default function StockUpdate() {
                       .includes(String(input || "").toLowerCase())
                   }
                 >
-                  <Input />
+                  <Input style={{ textTransform: 'uppercase' }} />
                 </AutoComplete>
               </Form.Item>
             </Col>
@@ -1012,7 +1058,7 @@ export default function StockUpdate() {
                       .includes(String(input || "").toLowerCase())
                   }
                 >
-                  <Input />
+                  <Input style={{ textTransform: 'uppercase' }} />
                 </AutoComplete>
               </Form.Item>
             </Col>
@@ -1030,7 +1076,7 @@ export default function StockUpdate() {
                       .includes(String(input || "").toLowerCase())
                   }
                 >
-                  <Input />
+                  <Input style={{ textTransform: 'uppercase' }} />
                 </AutoComplete>
               </Form.Item>
             </Col>
@@ -1051,7 +1097,12 @@ export default function StockUpdate() {
                     })}
                   </Select>
                 ) : (
-                  <Input placeholder="Type color" disabled={isVehicleLocked} />
+                  <Input
+                    placeholder="Type color"
+                    disabled={isVehicleLocked}
+                    style={{ textTransform: 'uppercase' }}
+                    onChange={(e) => form.setFieldsValue({ color: toCaps(e?.target?.value) })}
+                  />
                 )}
               </Form.Item>
               {!isVehicleLocked && (
@@ -1106,6 +1157,7 @@ export default function StockUpdate() {
                 <Input
                   placeholder={isChassisLocked ? "Chassis fixed for this movement" : "Enter chassis number"}
                   disabled={isChassisLocked}
+                  style={{ textTransform: 'uppercase' }}
                   onChange={(e) => {
                     const v = (e.target.value || "").toUpperCase();
                     form.setFieldsValue({ chassis: v });
@@ -1213,7 +1265,18 @@ export default function StockUpdate() {
               };
               const stockResp = await createStock({ data: row, createdBy: currentUser?.name || currentUser?.email || 'user' });
               if (!(stockResp?.success ?? stockResp?.ok)) {
-                message.error(stockResp?.message || 'Failed to update stock for this booking.');
+                const statusCode = Number(stockResp?.code || 0);
+                const apiMessage = stockResp?.message || 'Failed to update stock for this booking.';
+                if (statusCode === 409 || /chassis\s+already\s+exists/i.test(apiMessage)) {
+                  Modal.warning({
+                    title: "Duplicate Chassis Number",
+                    content: apiMessage,
+                    okText: "OK",
+                  });
+                  message.warning(apiMessage);
+                } else {
+                  message.error(apiMessage);
+                }
                 return;
               }
               message.success('Stock updated: vehicle marked booked / out of stock');

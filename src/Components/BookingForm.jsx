@@ -63,6 +63,8 @@ const FINANCIERS = [
 ];
 
 // Helpers for booking payment splits
+const DEFAULT_PAYMENT_PARTS = 3;
+const MAX_PAYMENT_PARTS = 10;
 const amt = (v) => Number(String(v ?? 0).replace(/[₹,\s]/g, "")) || 0;
 const derivePaymentPart = (src, idx) => {
   const pick = (key) => {
@@ -111,70 +113,37 @@ const derivePaymentPart = (src, idx) => {
     reference: online > 0 ? ref || undefined : undefined,
   };
 };
-const derivePaymentParts = (src) => [1, 2, 3].map((idx) => derivePaymentPart(src, idx));
+const derivePaymentParts = (src, partCount = DEFAULT_PAYMENT_PARTS) =>
+  Array.from({ length: Math.max(1, Math.min(MAX_PAYMENT_PARTS, Number(partCount) || DEFAULT_PAYMENT_PARTS)) }, (_, i) =>
+    derivePaymentPart(src, i + 1)
+  );
+const detectUsedPaymentParts = (src) => {
+  for (let idx = MAX_PAYMENT_PARTS; idx >= 1; idx--) {
+    const part = derivePaymentPart(src, idx);
+    if (part.total > 0 || String(part.reference || "").trim()) return idx;
+  }
+  return DEFAULT_PAYMENT_PARTS;
+};
 
 const phoneRule = [
   { required: true, message: "Mobile number is required" },
   { pattern: /^[6-9]\d{9}$/, message: "Enter a valid 10-digit Indian mobile number" },
 ];
 
-// CSV published from Google Sheets (same as in Quotation.jsx)
-const SHEET_CSV_URL =
-  import.meta.env.VITE_VEHICLE_SHEET_CSV_URL ||
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vQYGuNPY_2ivfS7MTX4bWiu1DWdF2mrHSCnmTznZVEHxNmsrgcGWjVZN4UDUTOzQQdXTnbeM-ylCJbB/pub?gid=408799621&single=true&output=csv";
+const CATALOG_GAS_URL = resolveUnifiedGasUrl("catalog");
 
 // Google Apps Script Web App endpoint to save bookings to Google Sheet
 const DEFAULT_BOOKING_GAS_URL =
   "https://script.google.com/macros/s/AKfycbwd-hKTwEfAretqEn7c_jIqNgheFgDaSVjCO3wHHQxgXQbbd8grLr8tUaRyLoAJWe4O/exec?module=booking";
 const getBookingGasUrl = () =>
-  resolveUnifiedGasUrl('booking', import.meta.env.VITE_BOOKING_GAS_URL || DEFAULT_BOOKING_GAS_URL);
+  resolveUnifiedGasUrl("booking") || import.meta.env.VITE_BOOKING_GAS_URL || DEFAULT_BOOKING_GAS_URL;
 
 const BOOKING_GAS_SECRET = import.meta.env.VITE_BOOKING_GAS_SECRET || "";
 
-// Minimal CSV parser
-const parseCsv = (text) => {
-  const rows = [];
-  let row = [],
-    col = "",
-    inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i],
-      n = text[i + 1];
-    if (c === '"' && !inQuotes) {
-      inQuotes = true;
-      continue;
-    }
-    if (c === '"' && inQuotes) {
-      if (n === '"') {
-        col += '"';
-        i++;
-        continue;
-      }
-      inQuotes = false;
-      continue;
-    }
-    if (c === "," && !inQuotes) {
-      row.push(col);
-      col = "";
-      continue;
-    }
-    if ((c === "\n" || c === "\r") && !inQuotes) {
-      if (col !== "" || row.length) {
-        row.push(col);
-        rows.push(row);
-        row = [];
-        col = "";
-      }
-      if (c === "\r" && n === "\n") i++;
-      continue;
-    }
-    col += c;
-  }
-  if (col !== "" || row.length) {
-    row.push(col);
-    rows.push(row);
-  }
-  return rows;
+const appendQuery = (url, params = {}) => {
+  const q = new URLSearchParams(params).toString();
+  if (!q) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}${q}`;
 };
 
 // Header aliases
@@ -182,6 +151,7 @@ const HEADERS = {
   company: ["Company", "Company Name"],
   model: ["Model", "Model Name"],
   variant: ["Variant"],
+  color: ["Color", "Colours", "COLOR"],
   price: ["On-Road Price", "On Road Price", "OnRoadPrice", "Price"],
 };
 
@@ -193,26 +163,19 @@ const pick = (row, keys) =>
   ).trim();
 
 const normalizeSheetRow = (row = {}) => ({
-  company: pick(row, HEADERS.company),
-  model: pick(row, HEADERS.model),
-  variant: pick(row, HEADERS.variant),
+  company: toCaps(pick(row, HEADERS.company)),
+  model: toCaps(pick(row, HEADERS.model)),
+  variant: toCaps(pick(row, HEADERS.variant)),
+  color: toCaps(pick(row, HEADERS.color)),
   onRoadPrice:
     Number(String(pick(row, HEADERS.price) || "0").replace(/[,\s₹]/g, "")) || 0,
 });
 
-// Fallback normalize (for older static JSON shape if ever used)
-const normalizeFallbackRow = (row = {}) => ({
-  company: String(row["Company Name"] || row.company || "").trim(),
-  model: String(row["Model Name"] || row.model || "").trim(),
-  variant: String(row["Variant"] || row.variant || "").trim(),
-  onRoadPrice:
-    Number(
-      String(row["On-Road Price"] || row.onRoadPrice || "0").replace(
-        /[,₹\s]/g,
-        ""
-      )
-    ) || 0,
-});
+const splitCatalogColors = (value) =>
+  String(value || "")
+    .split(/[\/,|]/)
+    .map((v) => toCaps(v))
+    .filter(Boolean);
 
 export default function BookingForm({
   asModal = false,
@@ -246,6 +209,7 @@ export default function BookingForm({
   const [dynamicExecutives, setDynamicExecutives] = useState([]);
   const [dynamicLoading, setDynamicLoading] = useState(false);
   const [chassisLocked, setChassisLocked] = useState(false);
+  const [paymentPartCount, setPaymentPartCount] = useState(DEFAULT_PAYMENT_PARTS);
   const [activeBranchSet, setActiveBranchSet] = useState(null); // lower-case branch names
   const location = useLocation();
   const autoFetchRequest = location.state?.autoFetch;
@@ -291,21 +255,7 @@ export default function BookingForm({
   const purchaseType = Form.useWatch("purchaseType", form);
   const addressProofMode = Form.useWatch("addressProofMode", form);
   const paymentMode = Form.useWatch("paymentMode", form); // legacy, unused
-  const bookingAmount1Cash = Form.useWatch("bookingAmount1Cash", form);
-  const bookingAmount2Cash = Form.useWatch("bookingAmount2Cash", form);
-  const bookingAmount3Cash = Form.useWatch("bookingAmount3Cash", form);
-  const bookingAmount1Online = Form.useWatch("bookingAmount1Online", form);
-  const bookingAmount2Online = Form.useWatch("bookingAmount2Online", form);
-  const bookingAmount3Online = Form.useWatch("bookingAmount3Online", form);
-  const bookingAmount1 = Form.useWatch("bookingAmount1", form);
-  const bookingAmount2 = Form.useWatch("bookingAmount2", form);
-  const bookingAmount3 = Form.useWatch("bookingAmount3", form);
-  const paymentMode1 = Form.useWatch("paymentMode1", form);
-  const paymentMode2 = Form.useWatch("paymentMode2", form);
-  const paymentMode3 = Form.useWatch("paymentMode3", form);
-  const paymentReference1 = Form.useWatch("paymentReference1", form);
-  const paymentReference2 = Form.useWatch("paymentReference2", form);
-  const paymentReference3 = Form.useWatch("paymentReference3", form);
+  const allValuesWatch = Form.useWatch([], form) || {};
   const chassisNo = Form.useWatch("chassisNo", form);
 
   const handleBookingApplied = useCallback(
@@ -366,35 +316,9 @@ export default function BookingForm({
 
   // Total booking amount
   const bookingTotal = useMemo(() => {
-    const parts = derivePaymentParts({
-      bookingAmount1Cash,
-      bookingAmount2Cash,
-      bookingAmount3Cash,
-      bookingAmount1Online,
-      bookingAmount2Online,
-      bookingAmount3Online,
-      bookingAmount1,
-      bookingAmount2,
-      bookingAmount3,
-      paymentMode1,
-      paymentMode2,
-      paymentMode3,
-    });
+    const parts = derivePaymentParts((k) => allValuesWatch[k], paymentPartCount);
     return parts.reduce((sum, p) => sum + p.total, 0);
-  }, [
-    bookingAmount1Cash,
-    bookingAmount2Cash,
-    bookingAmount3Cash,
-    bookingAmount1Online,
-    bookingAmount2Online,
-    bookingAmount3Online,
-    bookingAmount1,
-    bookingAmount2,
-    bookingAmount3,
-    paymentMode1,
-    paymentMode2,
-    paymentMode3,
-  ]);
+  }, [allValuesWatch, paymentPartCount]);
 
   const downPaymentWatch = Form.useWatch("downPayment", form);
   const extraFittingAmountWatch = Form.useWatch("extraFittingAmount", form);
@@ -413,13 +337,23 @@ export default function BookingForm({
     return Number(found?.onRoadPrice || 0) || 0;
   }, [bikeData, selectedCompany, selectedModel, selectedVariant]);
 
-  const [onRoadPriceEditing, setOnRoadPriceEditing] = useState(false);
   const [onRoadPriceOverride, setOnRoadPriceOverride] = useState(null);
-
+  const selectedCatalogRow = useMemo(() => {
+    const norm = (s) => String(s || "").trim().toLowerCase();
+    const cKey = norm(selectedCompany);
+    const mKey = norm(selectedModel);
+    const vKey = norm(selectedVariant);
+    if (!cKey || !mKey || !vKey) return null;
+    return bikeData.find(
+      (r) =>
+        norm(r.company) === cKey &&
+        norm(r.model) === mKey &&
+        norm(r.variant) === vKey
+    ) || null;
+  }, [bikeData, selectedCompany, selectedModel, selectedVariant]);
   useEffect(() => {
-    setOnRoadPriceEditing(false);
     setOnRoadPriceOverride(null);
-  }, [selectedOnRoadPrice]);
+  }, [selectedCompany, selectedModel, selectedVariant]);
 
   const effectiveOnRoadPrice = Number(
     onRoadPriceOverride ?? selectedOnRoadPrice ?? 0
@@ -561,7 +495,7 @@ export default function BookingForm({
   // Prepare booking values for the printable sheet
   const valsForPrint = useMemo(() => {
     const fv = form.getFieldsValue(true);
-    const split = derivePaymentParts((k) => fv[k]);
+    const split = derivePaymentParts((k) => fv[k], paymentPartCount);
     const payments = [];
     split.forEach((p) => {
       if (p.cash > 0) payments.push({ part: p.part, amount: p.cash, mode: "cash" });
@@ -607,15 +541,8 @@ export default function BookingForm({
     selectedVariant,
     selectedColor,
     chassisNo,
-    bookingAmount1Cash,
-    bookingAmount2Cash,
-    bookingAmount3Cash,
-    bookingAmount1Online,
-    bookingAmount2Online,
-    bookingAmount3Online,
-    paymentReference1,
-    paymentReference2,
-    paymentReference3,
+    allValuesWatch,
+    paymentPartCount,
     wCustomerName,
     wMobileNumber,
     wAddress,
@@ -792,7 +719,7 @@ export default function BookingForm({
   // Clear payment references when the corresponding mode is not online
   useEffect(() => {
     const patch = {};
-    const parts = derivePaymentParts((key) => form.getFieldValue(key));
+    const parts = derivePaymentParts((key) => form.getFieldValue(key), paymentPartCount);
     parts.forEach((p) => {
       const refKey = `paymentReference${p.part}`;
       if (p.online <= 0 && form.getFieldValue(refKey)) {
@@ -800,18 +727,12 @@ export default function BookingForm({
       }
     });
     if (Object.keys(patch).length) form.setFieldsValue(patch);
-  }, [
-    bookingAmount1Online,
-    bookingAmount2Online,
-    bookingAmount3Online,
-    bookingAmount1,
-    bookingAmount2,
-    bookingAmount3,
-    paymentMode1,
-    paymentMode2,
-    paymentMode3,
-    form,
-  ]);
+  }, [allValuesWatch, form, paymentPartCount]);
+
+  useEffect(() => {
+    const detected = detectUsedPaymentParts((key) => allValuesWatch[key]);
+    if (detected > paymentPartCount) setPaymentPartCount(detected);
+  }, [allValuesWatch, paymentPartCount]);
 
   // Apply external initial values (e.g., from Stocks)
   useEffect(() => {
@@ -882,74 +803,26 @@ export default function BookingForm({
     }
   }, [form, handleBookingApplied, setSelectedCompany, setSelectedModel]);
 
-  // Load vehicle data from Google Sheet
+  // Load vehicle data from owner Catalog via GAS webhook only
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
-        const res = await fetch(SHEET_CSV_URL, { cache: "no-store" });
-        if (!res.ok) throw new Error("sheet fetch failed");
-        const csv = await res.text();
-        if (csv.trim().startsWith("<")) throw new Error("expected CSV, got HTML");
-        const rows = parseCsv(csv);
-        if (!rows.length) throw new Error("empty sheet");
-        const headers = rows[0].map((h) => (h || "").trim());
-        const data = rows.slice(1).map((r) => {
-          const obj = {};
-          headers.forEach((h, i) => (obj[h] = r[i] ?? ""));
-          return obj;
-        });
+        if (!CATALOG_GAS_URL) throw new Error("Catalog webhook URL not configured for owner");
+        const url = appendQuery(CATALOG_GAS_URL, { action: "list" });
+        const res = await fetch(url, { method: "GET", mode: "cors", credentials: "omit", cache: "no-store" });
+        if (!res.ok) throw new Error("catalog fetch failed");
+        const body = await res.json();
+        const data = body?.data || body?.items || body?.rows || body || [];
+        if (!Array.isArray(data)) throw new Error("invalid catalog response");
         const cleaned = data
           .map(normalizeSheetRow)
           .filter((r) => r.company && r.model && r.variant);
+        if (!cleaned.length) throw new Error("empty catalog");
         if (!cancelled) setBikeData(cleaned);
       } catch {
-        try {
-          const res2 = await fetch("/bikeData.json", { cache: "no-store" });
-          if (!res2.ok) throw new Error("fallback missing");
-          const data = await res2.json();
-          const cleaned = (Array.isArray(data) ? data : [])
-            .map(normalizeFallbackRow)
-            .filter((r) => r.company && r.model && r.variant);
-          if (!cancelled) setBikeData(cleaned);
-          if (!Array.isArray(data))
-            message.warning("Loaded fallback bikeData.json");
-        } catch {
-          try {
-            const brands = [
-              "bajaj",
-              "honda",
-              "tvs",
-              "suzuki",
-              "yamaha",
-              "royalEnfield",
-            ];
-            const lists = await Promise.all(
-              brands.map(async (b) => {
-                try {
-                  const r = await fetch(`/${b}.json`, {
-                    cache: "no-store",
-                  });
-                  if (!r.ok) return [];
-                  const js = await r.json();
-                  return Array.isArray(js) ? js : [];
-                } catch {
-                  return [];
-                }
-              })
-            );
-            const merged = lists.flat();
-            const cleaned = merged
-              .map(normalizeFallbackRow)
-              .filter((r) => r.company && r.model && r.variant);
-            if (!cancelled) setBikeData(cleaned);
-            if (!cleaned.length) throw new Error("no data");
-          } catch {
-            message.error(
-              "Could not load vehicle data. Please try again later."
-            );
-          }
-        }
+        if (!cancelled) setBikeData([]);
+        message.error("Could not load owner catalog from owner webhook URL.");
       }
     };
     load();
@@ -1016,9 +889,14 @@ export default function BookingForm({
   }, [activeBranchSet, isActiveStock]);
 
   // Derive colors and chassis from stockItems based on selection
+  const selectedCatalogColors = useMemo(() => {
+    return splitCatalogColors(selectedCatalogRow?.color);
+  }, [selectedCatalogRow]);
+
   const availableColors = useMemo(() => {
     const norm = (s) => String(s || "").trim().toLowerCase();
     const uniq = new Set();
+    selectedCatalogColors.forEach((c) => uniq.add(c));
     stockItems.forEach((s) => {
       if (!isActiveStock(s)) return;
       if (
@@ -1026,12 +904,19 @@ export default function BookingForm({
         norm(s.model) === norm(selectedModel) &&
         norm(s.variant) === norm(selectedVariant)
       ) {
-        const c = String(s.color || "").trim();
+        const c = toCaps(String(s.color || "").trim());
         if (c) uniq.add(c);
       }
     });
     return Array.from(uniq);
-  }, [stockItems, selectedCompany, selectedModel, selectedVariant]);
+  }, [
+    selectedCatalogColors,
+    stockItems,
+    selectedCompany,
+    selectedModel,
+    selectedVariant,
+    isActiveStock,
+  ]);
 
   const availableChassis = useMemo(() => {
     const norm = (s) => String(s || "").trim().toLowerCase();
@@ -1164,7 +1049,7 @@ export default function BookingForm({
         effAff -
         (Number(values.discountAmount) || 0);
 
-      const parts = derivePaymentParts((key) => values[key]);
+      const parts = derivePaymentParts((key) => values[key], paymentPartCount);
       const bookingSum = parts.reduce((s, p) => s + p.total, 0);
 
       if (bookingSum <= 0) {
@@ -1202,6 +1087,18 @@ export default function BookingForm({
         reference: p.reference,
       }));
 
+      const dynamicPaymentColumns = {};
+      for (let idx = 1; idx <= MAX_PAYMENT_PARTS; idx++) {
+        dynamicPaymentColumns[`bookingAmount${idx}`] = parts[idx - 1]?.total || undefined;
+        dynamicPaymentColumns[`paymentMode${idx}`] = parts[idx - 1]?.mode
+          ? parts[idx - 1].mode.toUpperCase()
+          : undefined;
+        dynamicPaymentColumns[`paymentReference${idx}`] =
+          (parts[idx - 1]?.online || 0) > 0 ? parts[idx - 1]?.reference || undefined : undefined;
+        dynamicPaymentColumns[`bookingAmount${idx}Cash`] = values[`bookingAmount${idx}Cash`] ?? undefined;
+        dynamicPaymentColumns[`bookingAmount${idx}Online`] = values[`bookingAmount${idx}Online`] ?? undefined;
+      }
+
       // Prepare raw payload snapshot
       const rawPayloadObj = {
         customerName: values.customerName,
@@ -1228,12 +1125,9 @@ export default function BookingForm({
         paymentMode1: legacyPayments[0]?.mode,
         paymentMode2: legacyPayments[1]?.mode,
         paymentMode3: legacyPayments[2]?.mode,
-        paymentReference1:
-          (parts[0]?.online || 0) > 0 ? parts[0]?.reference || undefined : undefined,
-        paymentReference2:
-          (parts[1]?.online || 0) > 0 ? parts[1]?.reference || undefined : undefined,
-        paymentReference3:
-          (parts[2]?.online || 0) > 0 ? parts[2]?.reference || undefined : undefined,
+        paymentReference1: (parts[0]?.online || 0) > 0 ? parts[0]?.reference || undefined : undefined,
+        paymentReference2: (parts[1]?.online || 0) > 0 ? parts[1]?.reference || undefined : undefined,
+        paymentReference3: (parts[2]?.online || 0) > 0 ? parts[2]?.reference || undefined : undefined,
         // Split amounts per partial (for easier reading in Sheet)
         bookingAmount1Cash: values.bookingAmount1Cash ?? undefined,
         bookingAmount1Online: values.bookingAmount1Online ?? undefined,
@@ -1241,6 +1135,7 @@ export default function BookingForm({
         bookingAmount2Online: values.bookingAmount2Online ?? undefined,
         bookingAmount3Cash: values.bookingAmount3Cash ?? undefined,
         bookingAmount3Online: values.bookingAmount3Online ?? undefined,
+        ...dynamicPaymentColumns,
         // Loan / No HP
         disbursementAmount:
           values.purchaseType === "loan" ||
@@ -1347,6 +1242,7 @@ export default function BookingForm({
         address: values.address || undefined,
         payments: paymentsExpanded,
         paymentSplit: parts,
+        paymentPartCount,
         discountAmount: values.discountAmount ?? 0,
         // Convenience fields for GAS (no code changes on backend needed)
         source: 'booking',
@@ -1373,6 +1269,7 @@ export default function BookingForm({
         bookingAmount2Online: values.bookingAmount2Online ?? undefined,
         bookingAmount3Cash: values.bookingAmount3Cash ?? undefined,
         bookingAmount3Online: values.bookingAmount3Online ?? undefined,
+        ...dynamicPaymentColumns,
         downPayment: values.downPayment ?? undefined,
         extraFittingAmount: values.extraFittingAmount ?? 0,
         affidavitCharges:
@@ -1466,6 +1363,7 @@ export default function BookingForm({
       // Reset form after confirmed success
       if (!skipReset) {
         form.resetFields();
+        setPaymentPartCount(DEFAULT_PAYMENT_PARTS);
         writeJson(DRAFT_KEY, null);
         form.setFieldsValue({
           executive: executiveDefault || "",
@@ -1536,14 +1434,34 @@ export default function BookingForm({
       form={form}
       onFinish={onFinish}
       onFinishFailed={onFinishFailed}
-      onValuesChange={(_, all) => {
+      onValuesChange={(changedValues, all) => {
+        try {
+          const skipUppercase = new Set([
+            "purchaseType",
+            "addressProofMode",
+            "paymentMode",
+          ]);
+          const patch = {};
+          Object.keys(changedValues || {}).forEach((key) => {
+            if (skipUppercase.has(key)) return;
+            const val = all?.[key];
+            if (typeof val !== "string") return;
+            const up = val.toUpperCase();
+            if (up !== val) patch[key] = up;
+          });
+          if (Object.keys(patch).length) {
+            form.setFieldsValue(patch);
+          }
+        } catch {
+          // ignore
+        }
         try {
           if (!ENABLE_DRAFT) return;
           const copy = { ...all };
-          [1, 2, 3].forEach((idx) => {
+          for (let idx = 1; idx <= MAX_PAYMENT_PARTS; idx++) {
             const onlineVal = Number(copy[`bookingAmount${idx}Online`] || 0) || 0;
             if (onlineVal <= 0) delete copy[`paymentReference${idx}`];
-          });
+          }
           writeJson(DRAFT_KEY, copy);
         } catch {
           // ignore
@@ -1672,6 +1590,13 @@ export default function BookingForm({
               size={ctlSize}
               placeholder="Select Company"
               disabled={paymentsOnlyMode}
+              showSearch
+              optionFilterProp="children"
+              filterOption={(input, option) =>
+                String(option?.children || "")
+                  .toLowerCase()
+                  .includes(String(input || "").toLowerCase())
+              }
               onChange={(v) => {
                 setSelectedCompany(v);
                 setSelectedModel("");
@@ -1705,6 +1630,13 @@ export default function BookingForm({
               size={ctlSize}
               placeholder="Select Model"
               disabled={paymentsOnlyMode || !selectedCompany}
+              showSearch
+              optionFilterProp="children"
+              filterOption={(input, option) =>
+                String(option?.children || "")
+                  .toLowerCase()
+                  .includes(String(input || "").toLowerCase())
+              }
               onChange={(v) => {
                 setSelectedModel(v);
                 form.setFieldsValue({
@@ -1736,6 +1668,13 @@ export default function BookingForm({
               size={ctlSize}
               placeholder="Select Variant"
               disabled={paymentsOnlyMode || !selectedModel}
+              showSearch
+              optionFilterProp="children"
+              filterOption={(input, option) =>
+                String(option?.children || "")
+                  .toLowerCase()
+                  .includes(String(input || "").toLowerCase())
+              }
               onChange={(v) => {
                 form.setFieldsValue({ color: undefined, chassisNo: undefined });
                 form.setFieldsValue({ variant: String(v).toUpperCase() });
@@ -1786,7 +1725,7 @@ export default function BookingForm({
                 size={ctlSize}
                 style={{ width: "100%" }}
                 value={effectiveOnRoadPrice}
-                disabled={!onRoadPriceEditing}
+                disabled={paymentsOnlyMode}
                 min={0}
                 onChange={(val) => {
                   const next = Number(val || 0) || 0;
@@ -2321,14 +2260,31 @@ export default function BookingForm({
         </Row>
       )}
 
-      {/* Booking Amount (3 partial payments) — moved below Balanced DP/Amount */}
+      {/* Booking Amount (dynamic partial payments) — moved below Balanced DP/Amount */}
       <Row gutter={[16, 0]}>
         <Col xs={24}>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>
+          <div style={{ fontWeight: 600, marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+            <span>
             Booking Payments (split Cash + Online inside each partial)
+            </span>
+            <Space>
+              <Button
+                size="small"
+                onClick={() => {
+                  if (paymentPartCount >= MAX_PAYMENT_PARTS) {
+                    message.info(`Maximum ${MAX_PAYMENT_PARTS} partial payments allowed`);
+                    return;
+                  }
+                  setPaymentPartCount((c) => Math.min(MAX_PAYMENT_PARTS, c + 1));
+                }}
+                disabled={paymentPartCount >= MAX_PAYMENT_PARTS}
+              >
+                Add-on Payment
+              </Button>
+            </Space>
           </div>
         </Col>
-        {[1, 2, 3].map((idx) => (
+        {Array.from({ length: paymentPartCount }, (_, i) => i + 1).map((idx) => (
           <React.Fragment key={`p-${idx}`}>
             <Col xs={24} md={8}>
               <Form.Item

@@ -400,7 +400,6 @@ export default function Navbar() {
   const navItems = [
     { label: "Home", path: "/" },
     { label: "Service", path: "/service" },
-    { label: "Gallery", path: "/gallery" },
     { label: "Contact", path: "/contact" },
     { label: "About Us", path: "/about-us" },
   ];

@@ -243,16 +243,18 @@ export const normalizeOwnerFreeFittingsConfig = (raw = {}) => {
 export const getOwnerConfig = () => {
   const u = readLocalUser();
   const role = String(u?.role || "").trim().toLowerCase();
+  const pickConfig = (src) =>
+    src?.ownerConfig ||
+    src?.metadata?.ownerConfig ||
+    src?.owner?.ownerConfig ||
+    src?.ownerId?.ownerConfig ||
+    src?.ownerData?.ownerConfig ||
+    {};
   if (role === "owner") {
     // Owner is the top-level tenant; never read nested owner.ownerConfig.
-    return u?.ownerConfig || u?.metadata?.ownerConfig || {};
+    return pickConfig(u);
   }
-  return (
-    u?.ownerConfig ||
-    u?.metadata?.ownerConfig ||
-    u?.owner?.ownerConfig ||
-    {}
-  );
+  return pickConfig(u);
 };
 
 const DEFAULT_OWNER_FLAT_INTEREST_RATE = 11;
@@ -447,7 +449,8 @@ export const getOwnerMechanics = () => {
 
 export const getOwnerLocationQrUrl = () => {
   const cfg = getOwnerConfig();
-  return resolveLocationQrImageUrl(cfg?.locationQrUrl);
+  const source = String(cfg?.locationQrUrl || cfg?.webhookUrl || "").trim();
+  return resolveLocationQrImageUrl(source);
 };
 
 export const resolveWebhookUrl = (fallback) => {

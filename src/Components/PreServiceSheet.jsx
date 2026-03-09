@@ -4,8 +4,6 @@ import {
   getOwnerOrgNameRegional,
   
   getOwnerOrgMobiles,
- 
-  getOwnerLocationQrUrl,
   resolveLocationQrImageUrl,
 } from "../utils/ownerConfig";
 import { inr, fmtDate, tick } from "../utils/printUtils";
@@ -81,7 +79,7 @@ const PreServiceSheet = forwardRef(function PreServiceSheet(
   const orgName = getOwnerOrgName() || "Motera";
   const orgNameRegional = getOwnerOrgNameRegional();
 
-  const locationQrUrl = resolveLocationQrImageUrl(locationQrUrlProp) || getOwnerLocationQrUrl() || "/location-qr.png";
+  const locationQrUrl = resolveLocationQrImageUrl(locationQrUrlProp) || "";
   const orgMobiles = getOwnerOrgMobiles();
   const mobLine = orgMobiles.length ? orgMobiles.join(" / ") : "-";
   const serviceTypeList = ["Free", "Paid", "Minor", "Accidental"];
@@ -301,7 +299,13 @@ img { max-width: 100%; height: auto; background: transparent; }
 
             {/* RIGHT SIDE (Location) */}
             <div className="qr-top">
-              <img src={locationQrUrl} alt="Location QR" className="qr-top-img" />
+              {locationQrUrl ? (
+                <img src={locationQrUrl} alt="Location QR" className="qr-top-img" />
+              ) : (
+                <div className="qr-top-img" style={{ display: "grid", placeItems: "center", border: "1px dashed #999", fontSize: 10 }}>
+                  QR N/A
+                </div>
+              )}
               <div className="qr-top-scan">Scan for Location</div>
               <div className="qr-top-mob">Mob: {mobLine}</div>
             </div>
@@ -461,7 +465,13 @@ img { max-width: 100%; height: auto; background: transparent; }
 
             {/* RIGHT: QR */}
             <div className="col col-right">
-              <img src={locationQrUrl} alt="Location QR" className="qr" />
+              {locationQrUrl ? (
+                <img src={locationQrUrl} alt="Location QR" className="qr" />
+              ) : (
+                <div className="qr" style={{ display: "grid", placeItems: "center", border: "1px dashed #999", fontSize: 10 }}>
+                  QR N/A
+                </div>
+              )}
               <div className="scan">Scan for Location</div>
               <div className="phones tiny">{mobLine}</div>
             </div>

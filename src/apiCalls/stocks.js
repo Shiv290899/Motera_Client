@@ -117,14 +117,14 @@ export const listPendingTransfers = async ({ branch, limit = 5000 } = {}) => {
 export const createStock = async ({ data: row, createdBy }) => {
   const payload = { action: "create", data: row, createdBy };
   const data = await gasPost(payload);
-  return { success: !!data.ok, data: data.data, message: data.message };
+  return { success: !!data.ok, data: data.data, message: data.message, code: data.code };
 };
 
 export const updateStock = async (movementId, patch) => {
   const normalized = normalizeStockPatch(patch || {});
   const payload = { action: "update", movementId, data: normalized };
   const data = await gasPost(payload);
-  return { success: !!data.ok, data: data.data, message: data.message };
+  return { success: !!data.ok, data: data.data, message: data.message, code: data.code };
 };
 
 export const deleteStock = async (movementId) => {

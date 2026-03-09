@@ -1,1 +1,0 @@
-const r=t=>{const n="".replace(/\D/g,"");return n?n.startsWith("91")?n:n.length===10?`91${n}`:n:null};(()=>{const t=r();return t?`tel:+${t}`:""})();(()=>{const t=r();return t?`https://wa.me/${t}`:""})();const e="Mon-Sat: 9:00 AM - 8:30 PM - Sun: 9:00 AM - 2:30 PM",o="hello@motera.com";export{e as B,o as C};

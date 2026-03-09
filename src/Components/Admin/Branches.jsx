@@ -1,7 +1,7 @@
 import React from "react";
-import { Table, Button, Space, Modal, Form, Input, Select, message, Tag, Row, Col, Typography, Tooltip, Grid, Checkbox } from "antd";
+import { Table, Button, Space, Modal, Form, Input, Select, message, Tag, Row, Col, Typography, Tooltip, Grid } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
-import { listBranches, createBranch, updateBranch, deleteBranch } from "../../apiCalls/branches";
+import { listBranches, createBranch, updateBranch } from "../../apiCalls/branches";
 import { getOwnerOrgName } from "../../utils/ownerConfig";
 
 const TYPE_OPTIONS = [
@@ -27,6 +27,7 @@ export default function Branches({ readOnly = false }) {
   const [editing, setEditing] = React.useState(null);
   const [form] = Form.useForm();
   const [isOwner, setIsOwner] = React.useState(false);
+  const [isAdmin, setIsAdmin] = React.useState(false);
   const [branchLimit, setBranchLimit] = React.useState(1);
   const [limitReached, setLimitReached] = React.useState(false);
   const [q, setQ] = React.useState("");
@@ -36,6 +37,7 @@ export default function Branches({ readOnly = false }) {
   // Controlled pagination
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(25);
+  const toUpper = (v) => (typeof v === "string" ? v.toUpperCase() : v);
 
   const fetchList = React.useCallback(async () => {
     setLoading(true);
@@ -86,6 +88,7 @@ export default function Branches({ readOnly = false }) {
     const role = String(u?.role || '').toLowerCase();
     const limit = Number.isFinite(u?.ownerLimits?.branchLimit) ? Math.max(0, Math.floor(u.ownerLimits.branchLimit)) : 1;
     setIsOwner(role === 'owner');
+    setIsAdmin(role === 'admin');
     setBranchLimit(limit);
   }, []);
 
@@ -123,12 +126,11 @@ export default function Branches({ readOnly = false }) {
 
   const exportCsv = () => {
     const headers = [
-      'Code','Name','Type','Status','Phone','Email','Line1','Line2','Area','City','State','Pincode','Latitude','Longitude'
+      'Code','Name','Type','Area','City','State','Pincode'
     ];
     const rows = filtered.map((b)=>[
-      b.code||'', b.name||'', b.type||'', b.status||'', b.phone||'', b.email||'',
-      b.address?.line1||'', b.address?.line2||'', b.address?.area||'', b.address?.city||'', b.address?.state||'', b.address?.pincode||'',
-      b.location?.coordinates?.[1] ?? '', b.location?.coordinates?.[0] ?? ''
+      b.code||'', b.name||'', b.type||'',
+      b.address?.area||'', b.address?.city||'', b.address?.state||'', b.address?.pincode||'',
     ]);
     const csv = [headers, ...rows].map(r => r.map(v => (String(v).includes(',') ? `"${String(v).replace(/"/g,'""')}"` : String(v))).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -148,95 +150,56 @@ export default function Branches({ readOnly = false }) {
     // Defer setting defaults until form is mounted in Modal
     setTimeout(() => {
       form.resetFields();
-      form.setFieldsValue({ type: "sales & services", status: "active" });
+      form.setFieldsValue({ type: "sales & services" });
     }, 0);
   };
 
   const onEdit = (row) => {
     setEditing(row);
     form.setFieldsValue({
-      id: row.id,
       code: row.code,
       name: row.name,
       type: row.type,
-      phone: row.phone,
-      email: row.email,
-      address_line1: row.address?.line1,
-      address_line2: row.address?.line2,
       area: row.address?.area,
       city: row.address?.city,
       state: row.address?.state,
       pincode: row.address?.pincode,
-      lat: row.location?.coordinates?.[1],
-      lng: row.location?.coordinates?.[0],
-      status: row.status,
-      manager: row.manager || undefined,
-      staffIds: Array.isArray(row.staff) ? row.staff.map(String).join(',') : undefined,
-      boysIds: Array.isArray(row.boys) ? row.boys.map(String).join(',') : undefined,
-      mechanicsIds: Array.isArray(row.mechanics) ? row.mechanics.map(String).join(',') : undefined,
-      isDefault: !!row.isDefault,
     });
     setModalOpen(true);
   };
 
-  const onDelete = async (row) => {
-    Modal.confirm({
-      title: `Delete ${row.name}?`,
-      content: `This cannot be undone.`,
-      okButtonProps: { danger: true },
-      okText: "Delete",
-      onOk: async () => {
-        try {
-          const res = await deleteBranch(row.id);
-          if (res?.success) {
-            message.success("Branch deleted");
-            fetchList();
-          } else {
-            message.error(res?.message || "Delete failed");
-          }
-        } catch {
-          message.error("Delete failed");
-        }
-      },
-    });
-  };
-
   const onSubmit = async () => {
+    const setCodeFieldError = (msg) => {
+      const text = String(msg || "").toLowerCase();
+      if (!text) return false;
+      if (text.includes("branch code") || text.includes("code already exists") || text.includes("duplicate code")) {
+        form.setFields([{ name: "code", errors: [msg || "Branch code already exists"] }]);
+        return true;
+      }
+      return false;
+    };
     try {
       const vals = await form.validateFields();
+      form.setFields([{ name: "code", errors: [] }]);
       const payload = {
-        code: vals.code,
-        name: vals.name,
+        code: toUpper(vals.code),
+        name: toUpper(vals.name),
         type: vals.type,
-        phone: vals.phone,
-        email: vals.email,
         address: {
-          line1: vals.address_line1,
-          line2: vals.address_line2,
-          area: vals.area,
-          city: vals.city,
-          state: vals.state,
+          area: toUpper(vals.area),
+          city: toUpper(vals.city),
+          state: toUpper(vals.state),
           pincode: vals.pincode,
         },
-        lat: vals.lat,
-        lng: vals.lng,
-        status: vals.status,
-        isDefault: !!vals.isDefault,
-        ...(vals.manager ? { manager: String(vals.manager).trim() } : {}),
-        ...(vals.staffIds ? { staff: String(vals.staffIds).split(',').map(s => s.trim()).filter(Boolean) } : {}),
-        ...(vals.boysIds ? { boys: String(vals.boysIds).split(',').map(s => s.trim()).filter(Boolean) } : {}),
-        ...(vals.mechanicsIds ? { mechanics: String(vals.mechanicsIds).split(',').map(s => s.trim()).filter(Boolean) } : {}),
+        status: "active",
       };
       setSaving(true);
       let res;
-      if (editing?.id) res = await updateBranch(editing.id, payload);
-      else {
-        if (isOwner && limitReached) {
-          message.warning(`Branch limit reached (${branchLimit}). Contact admin to increase.`);
-          return;
-        }
-        res = await createBranch(payload);
+      if (!editing && isOwner && limitReached) {
+        message.warning(`Branch limit reached (${branchLimit}). Contact admin to increase.`);
+        return;
       }
+      res = editing ? await updateBranch(editing.id || editing._id, payload) : await createBranch(payload);
       if (res?._status === 401 || res?._status === 403) {
         message.warning("Please login again to continue.");
         return;
@@ -248,11 +211,12 @@ export default function Branches({ readOnly = false }) {
         form.resetFields();
         fetchList();
       } else {
-        message.error(res?.message || "Save failed");
+        const errMsg = res?.message || "Save failed";
+        if (!setCodeFieldError(errMsg)) message.error(errMsg);
       }
     } catch (e) {
       const msg = e?.response?.data?.message || e?.message || "Save failed";
-      message.error(msg);
+      if (!setCodeFieldError(msg)) message.error(msg);
     } finally {
       setSaving(false);
     }
@@ -280,22 +244,12 @@ export default function Branches({ readOnly = false }) {
       return <Tag color={color}>{v}</Tag>;
     } },
     { title: "City", key: "city", width: 110, ellipsis: true, render: (_, r) => r.address?.city || "—" },
-    { title: "Phone", dataIndex: "phone", key: "phone", width: 110, ellipsis: true },
-    { title: "Staff", key: "staffCount", width: 60, render: (v, r) => (r.activeStaffCount ?? (Array.isArray(r.staff) ? r.staff.length : 0)) },
-    { title: "Boys", key: "boysCount", width: 60, render: (v, r) => (r.activeBoysCount ?? (Array.isArray(r.boys) ? r.boys.length : 0)) },
-    { title: "Mechanics", key: "mechCount", width: 80, render: (v, r) => (r.activeMechanicsCount ?? (Array.isArray(r.mechanics) ? r.mechanics.length : 0)) },
-    { title: "Status", dataIndex: "status", key: "status", width: 110, render: (v) => (
-      v === "active" ? <Tag color="green">Active</Tag> : v === "inactive" ? <Tag>Inactive</Tag> : <Tag color="orange">Under Maintenance</Tag>
-    ) },
-    ...(!readOnly ? [{
+    ...(isAdmin && !readOnly ? [{
       title: "Actions",
       key: "actions",
-      width: 140,
+      width: 90,
       render: (_, row) => (
-        <Space size={4} wrap>
-          <Button size="small" onClick={() => onEdit(row)}>Edit</Button>
-          <Button size="small" danger onClick={() => onDelete(row)}>Delete</Button>
-        </Space>
+        <Button size="small" onClick={() => onEdit(row)}>Edit</Button>
       ),
     }] : []),
   ];
@@ -304,7 +258,7 @@ export default function Branches({ readOnly = false }) {
     <div>
       <div style={{ display: "flex", gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
         <Space size={[8,8]} wrap>
-          <Input.Search placeholder="Search code/name/city/phone" allowClear value={q} onChange={(e)=>setQ(e.target.value)} style={{ minWidth: 220 }} />
+          <Input.Search placeholder="Search code/name/city" allowClear value={q} onChange={(e)=>setQ(e.target.value)} style={{ minWidth: 220 }} />
           <Select value={cityFilter} onChange={setCityFilter} style={{ minWidth: 160 }} options={cities.map(c=>({ value: c, label: c==='all'?'All Cities':c }))} />
           <Select value={typeFilter} onChange={setTypeFilter} style={{ minWidth: 160 }} options={[{value:'all',label:'All Types'},...TYPE_OPTIONS]} />
           <Select value={statusFilter} onChange={setStatusFilter} style={{ minWidth: 180 }} options={[{value:'all',label:'All Status'},...STATUS_OPTIONS]} />
@@ -353,7 +307,7 @@ export default function Branches({ readOnly = false }) {
       />
 
       <Modal
-        title={editing ? `Edit Branch – ${editing.name}` : "New Branch"}
+        title={editing ? `Edit Branch - ${editing?.name || ""}` : "New Branch"}
         open={modalOpen}
         onCancel={() => { setModalOpen(false); setEditing(null); }}
         onOk={onSubmit}
@@ -366,12 +320,12 @@ export default function Branches({ readOnly = false }) {
           <Row gutter={[12, 8]}>
             <Col xs={24} sm={12}>
               <Form.Item name="code" label="Code" rules={[{ required: true, message: "Code is required" }]}>
-                <Input placeholder="e.g., BDRH" maxLength={10} />
+                <Input placeholder="e.g., BDRH" maxLength={10} style={{ textTransform: "uppercase" }} onChange={(e)=>form.setFieldValue("code", toUpper(e?.target?.value || ""))} />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>
               <Form.Item name="name" label="Name" rules={[{ required: true, message: "Name is required" }]}>
-                <Input placeholder={`e.g., ${(getOwnerOrgName() || "Motera")} Branch`} />
+                <Input placeholder={`e.g., ${(getOwnerOrgName() || "Motera")} Branch`} style={{ textTransform: "uppercase" }} onChange={(e)=>form.setFieldValue("name", toUpper(e?.target?.value || ""))} />
               </Form.Item>
             </Col>
 
@@ -381,91 +335,24 @@ export default function Branches({ readOnly = false }) {
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>
-              <Form.Item name="status" label="Status" initialValue="active" rules={[{ required: true }]}>
-                <Select options={STATUS_OPTIONS} />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12}>
-              <Form.Item name="isDefault" valuePropName="checked">
-                <Checkbox>Default Branch</Checkbox>
-              </Form.Item>
-            </Col>
-
-            <Col xs={24} sm={12}>
-              <Form.Item name="phone" label="Phone">
-                <Input placeholder="Branch phone" />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12}>
-              <Form.Item name="email" label="Email">
-                <Input placeholder="Branch email" type="email" />
-              </Form.Item>
-            </Col>
-
-            <Col span={24}>
-              <Form.Item name="address_line1" label="Address Line 1">
-                <Input />
-              </Form.Item>
-            </Col>
-            <Col span={24}>
-              <Form.Item name="address_line2" label="Address Line 2">
-                <Input />
-              </Form.Item>
-            </Col>
-
-            <Col xs={24} sm={12}>
               <Form.Item name="area" label="Area">
-                <Input />
+                <Input style={{ textTransform: "uppercase" }} onChange={(e)=>form.setFieldValue("area", toUpper(e?.target?.value || ""))} />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>
               <Form.Item name="city" label="City" rules={[{ required: true, message: "City is required" }]}>
-                <Input />
+                <Input style={{ textTransform: "uppercase" }} onChange={(e)=>form.setFieldValue("city", toUpper(e?.target?.value || ""))} />
               </Form.Item>
             </Col>
 
             <Col xs={24} sm={12}>
               <Form.Item name="state" label="State">
-                <Input />
+                <Input style={{ textTransform: "uppercase" }} onChange={(e)=>form.setFieldValue("state", toUpper(e?.target?.value || ""))} />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>
               <Form.Item name="pincode" label="Pincode">
                 <Input />
-              </Form.Item>
-            </Col>
-
-            <Col xs={24} sm={12}>
-              <Form.Item name="lat" label="Latitude">
-                <Input type="number" step="any" />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12}>
-              <Form.Item name="lng" label="Longitude">
-                <Input type="number" step="any" />
-              </Form.Item>
-            </Col>
-
-            {/* Associations (IDs). In a future iteration, replace with searchable pickers. */}
-            <Col xs={24} sm={12}>
-              <Form.Item name="manager" label="Manager (User ID)">
-                <Input placeholder="24-char user id (optional)" />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12}>
-              <Form.Item name="staffIds" label="Staff (comma-separated User IDs)">
-                <Input placeholder="id1,id2,id3" />
-              </Form.Item>
-            </Col>
-
-            <Col xs={24} sm={12}>
-              <Form.Item name="boysIds" label="Boys (comma-separated User IDs)">
-                <Input placeholder="id1,id2" />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12}>
-              <Form.Item name="mechanicsIds" label="Mechanics (comma-separated User IDs)">
-                <Input placeholder="id1,id2" />
               </Form.Item>
             </Col>
           </Row>

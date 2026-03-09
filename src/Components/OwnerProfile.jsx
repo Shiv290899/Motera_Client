@@ -150,6 +150,61 @@ export default function OwnerProfile() {
   const [inviteUrl, setInviteUrl] = React.useState("");
   const [inviteLoading, setInviteLoading] = React.useState(false);
   const [branchOptions, setBranchOptions] = React.useState([]);
+  const [copyingInvite, setCopyingInvite] = React.useState(false);
+  const [sharingInvite, setSharingInvite] = React.useState(false);
+
+  const copyInviteLink = React.useCallback(async () => {
+    const link = String(inviteUrl || "").trim();
+    if (!link) {
+      message.warning("Create invite link first");
+      return;
+    }
+    setCopyingInvite(true);
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(link);
+      } else {
+        const temp = document.createElement("textarea");
+        temp.value = link;
+        temp.setAttribute("readonly", "");
+        temp.style.position = "absolute";
+        temp.style.left = "-9999px";
+        document.body.appendChild(temp);
+        temp.select();
+        document.execCommand("copy");
+        document.body.removeChild(temp);
+      }
+      message.success("Invite link copied");
+    } catch {
+      message.error("Failed to copy invite link");
+    } finally {
+      setCopyingInvite(false);
+    }
+  }, [inviteUrl]);
+
+  const shareInviteLink = React.useCallback(async () => {
+    const link = String(inviteUrl || "").trim();
+    if (!link) {
+      message.warning("Create invite link first");
+      return;
+    }
+    if (!navigator?.share) {
+      message.info("Share not supported on this device. Use Copy Link.");
+      return;
+    }
+    setSharingInvite(true);
+    try {
+      await navigator.share({
+        title: "Motera Staff Invite",
+        text: "Use this invite link to join our Motera team.",
+        url: link,
+      });
+    } catch {
+      // Ignore user-cancel share silently
+    } finally {
+      setSharingInvite(false);
+    }
+  }, [inviteUrl]);
 
   React.useEffect(() => {
     setLogoPreviewFailed(false);
@@ -756,6 +811,14 @@ export default function OwnerProfile() {
               </Space>
               <div style={{ marginTop: 12 }}>
                 <Input value={inviteUrl} readOnly placeholder="Invite link will appear here" />
+                <Space style={{ marginTop: 8 }} wrap>
+                  <Button onClick={copyInviteLink} loading={copyingInvite} disabled={!inviteUrl}>
+                    Copy Link
+                  </Button>
+                  <Button onClick={shareInviteLink} loading={sharingInvite} disabled={!inviteUrl}>
+                    Share Link
+                  </Button>
+                </Space>
               </div>
             </div>
 

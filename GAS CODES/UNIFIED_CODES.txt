@@ -2,10 +2,10 @@
 
 // Set this to your single master spreadsheet ID to use one file for all modules.
 // If left blank, modules will use their own IDs or the active spreadsheet (if bound).
-const MASTER_SPREADSHEET_ID = '1oc2RsO6M67vhdxeoIoUMzuPp6XpnJutgkV9UrRFppvc';
+const MASTER_SPREADSHEET_ID = '';
 
 // Optional: override the DailyCollections master spreadsheet used by Booking/JobCard/MinorSales.
-const MASTER_DAILY_COLLECTIONS_ID = '1oc2RsO6M67vhdxeoIoUMzuPp6XpnJutgkV9UrRFppvc';
+const MASTER_DAILY_COLLECTIONS_ID = '';
 
 const MODULE_ALIASES = {
   booking: ['booking', 'bookings'],
@@ -195,7 +195,7 @@ const HEADERS = [
 ];
 
 // 🔴 Master DailyCollections spreadsheet (one for all modules)
-const DC_MASTER_SPREADSHEET_ID = MASTER_DAILY_COLLECTIONS_ID || '1oYOaFhEr7PgdF0BDC5A4V2zfPPoFtnhbxcP16jMqiGs';
+const DC_MASTER_SPREADSHEET_ID = MASTER_DAILY_COLLECTIONS_ID ;
 
 // ===================== CREATE / UPDATE =====================
 
@@ -6438,7 +6438,7 @@ const VehicleCatalogModule = (() => {
  */
 
 // Target sheet: https://docs.google.com/spreadsheets/d/1XSwT6GQiXUsH_zH8VEymsrCfHb1QW_FbdKwMSqnE4_U/edit?gid=0#gid=0
-const SPREADSHEET_ID = MASTER_SPREADSHEET_ID || '1XSwT6GQiXUsH_zH8VEymsrCfHb1QW_FbdKwMSqnE4_U'; // Sheet ID
+const SPREADSHEET_ID = MASTER_SPREADSHEET_ID; // Sheet ID
 const SHEET_NAME = 'Catalog';
 
 function getSheet_() {

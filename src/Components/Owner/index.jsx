@@ -57,7 +57,7 @@ export default function OwnerIndex() {
 
   const items = [
     // 1) Quotation (form), 2) Quotations (list), 3) Job Cards, 4) Bookings
-    { key: 'collections', label: 'Daily Collections', children: <AdminDailyCollections /> },
+    
     
     { key: 'quotations', label: 'Quotations', children: <Quotations /> },
     
@@ -75,6 +75,7 @@ export default function OwnerIndex() {
     { key: 'branches', label: 'Branches', children: <Branches /> },
     { key: 'users', label: 'Users', children: <Users /> },
     { key: 'vehiclecatalog', label: 'Vehicle Catalog', children: <VehicleCatalogManager /> },
+    { key: 'collections', label: 'Daily Collections', children: <AdminDailyCollections /> },
     // 9) Analytics & Reports, 10) Branch-level Sales, 11) Multi-branch Compare, 12) Sales Performance
     /* { key: 'analytics', label: 'Analytics & Reports', children: <AnalyticsReports /> },
     { key: 'branch', label: 'Branch-level Sales', children: <BranchSales /> },

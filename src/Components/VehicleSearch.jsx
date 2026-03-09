@@ -306,6 +306,8 @@ export default function VehicleSearch() {
   const [docPreview, setDocPreview] = useState({ open: false, title: "", url: "", mobile: "" });
   const invoiceRef = useRef(null);
   const searchSeqRef = useRef(0);
+  const serviceQualityRef = useRef(0);
+  const bookingQualityRef = useRef(0);
 
   const mainBooking = bookings[0] || null;
   const serviceTimeline = useMemo(() => {
@@ -380,6 +382,8 @@ export default function VehicleSearch() {
     }
     const searchSeq = ++searchSeqRef.current;
     const isActiveSearch = () => searchSeqRef.current === searchSeq;
+    serviceQualityRef.current = 0;
+    bookingQualityRef.current = 0;
     setLoading(true);
     setBookingLoading(true);
     setServiceLoading(true);
@@ -414,11 +418,48 @@ export default function VehicleSearch() {
       let bookingPending = 0;
       let servicePending = 0;
 
+      const scoreBookingRows = (rows = []) =>
+        rows.reduce((sum, r) => {
+          if (!r) return sum;
+          return (
+            sum +
+            (r.customerName ? 1 : 0) +
+            (r.mobile ? 1 : 0) +
+            (r.vehicle ? 1 : 0) +
+            (r.branch ? 1 : 0) +
+            (r.chassis ? 1 : 0) +
+            (r.color ? 1 : 0)
+          );
+        }, 0);
+
+      const scoreServiceRows = (rows = []) =>
+        rows.reduce((sum, r) => {
+          if (!r) return sum;
+          return (
+            sum +
+            (r.jcNo ? 1 : 0) +
+            (r.custName ? 1 : 0) +
+            (r.mobile ? 1 : 0) +
+            (r.model ? 1 : 0) +
+            (r.company ? 1 : 0) +
+            (r.branch ? 1 : 0) +
+            (r.executive ? 1 : 0) +
+            (r.serviceType ? 1 : 0) +
+            (r.colour || r.color ? 1 : 0) +
+            (r.km ? 1 : 0)
+          );
+        }, 0);
+
       const applyBookings = (rows) => {
         const parsed = (rows || []).map((r) => parseBookingRow(r));
         if (!parsed.length) return;
-        // Keep the most complete result set if multiple async calls return.
-        if (!nextBookings.length || parsed.length >= nextBookings.length) {
+        const quality = scoreBookingRows(parsed);
+        if (
+          !nextBookings.length ||
+          parsed.length > nextBookings.length ||
+          (parsed.length === nextBookings.length && quality >= bookingQualityRef.current)
+        ) {
+          bookingQualityRef.current = quality;
           nextBookings = parsed;
           if (isActiveSearch()) setBookings(parsed);
         }
@@ -428,7 +469,13 @@ export default function VehicleSearch() {
       const applyServices = (rows) => {
         const parsed = (rows || []).map((r) => parseJobRow(r));
         if (!parsed.length) return;
-        if (!nextServices.length || parsed.length >= nextServices.length) {
+        const quality = scoreServiceRows(parsed);
+        if (
+          !nextServices.length ||
+          parsed.length > nextServices.length ||
+          (parsed.length === nextServices.length && quality >= serviceQualityRef.current)
+        ) {
+          serviceQualityRef.current = quality;
           nextServices = parsed;
           if (isActiveSearch()) setServices(parsed);
         }

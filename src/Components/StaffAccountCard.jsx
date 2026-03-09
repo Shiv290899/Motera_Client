@@ -23,6 +23,7 @@ export default function StaffAccountCard() {
   const [txMode, setTxMode] = useState('cash'); // 'cash' | 'online'
   const [txRows, setTxRows] = useState([]);
   const [txLoading, setTxLoading] = useState(false);
+  const [txCache, setTxCache] = useState({ all: [], cash: [], online: [], loaded: false });
   const [hasCache, setHasCache] = useState(false);
   const [pendingLoading, setPendingLoading] = useState(false);
   const [pendingServiceRows, setPendingServiceRows] = useState([]);
@@ -55,14 +56,24 @@ export default function StaffAccountCard() {
     try { localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), data: obj })); } catch {/* ignore */}
   };
 
+  const splitTransactionsByMode = (rows = []) => {
+    const list = Array.isArray(rows) ? rows : [];
+    const cashRows = list.filter((r) => Number(r?.cashPending || 0) > 0);
+    const onlineRows = list.filter((r) => Number(r?.onlinePending || 0) > 0);
+    return { all: list, cash: cashRows, online: onlineRows, loaded: true };
+  };
+
   const load = async () => {
     if (!GAS_URL || !branch || !staff) return;
     setLoading(true);
     try {
-      // Prefer new StaffLedger summary
-      const payload = SECRET ? { action:'staff_ledger_summary', branch, staff, secret: SECRET } : { action:'staff_ledger_summary', branch, staff };
-      const resp = await saveJobcardViaWebhook({ webhookUrl: GAS_URL, method:'GET', payload });
-      const js = resp?.data || resp || {};
+      // Fetch summary + full transaction list in parallel for faster first paint.
+      const summaryPayload = SECRET ? { action:'staff_ledger_summary', branch, staff, secret: SECRET } : { action:'staff_ledger_summary', branch, staff };
+      const [summaryResp, allTxRows] = await Promise.all([
+        saveJobcardViaWebhook({ webhookUrl: GAS_URL, method:'GET', payload: summaryPayload }),
+        fetchLedgerTransactions({ GAS_URL, SECRET, branch, staff, mode: 'all' }).catch(() => []),
+      ]);
+      const js = summaryResp?.data || summaryResp || {};
       if (!js?.success) throw new Error('Failed');
       const payloadData = js?.data && typeof js.data === 'object' ? js.data : js;
 
@@ -92,9 +103,12 @@ export default function StaffAccountCard() {
       saveCache(base);
       setLoading(false); // stop spinner while we compute detailed breakdown
 
-      // Also fetch transactions to compute per-source breakdown from ledger
+      // Cache transactions immediately so View dialogs don't hit webhook again.
+      setTxCache(splitTransactionsByMode(allTxRows));
+
+      // Compute per-source breakdown from preloaded ledger transactions.
       try {
-        const all = await fetchLedgerTransactions({ GAS_URL, SECRET, branch, staff, mode: 'all' });
+        const all = Array.isArray(allTxRows) ? allTxRows : [];
         const normType = (x) => {
           const s = String(x||'').toLowerCase().trim();
           const z = s.replace(/[^a-z]/g,'');
@@ -265,26 +279,14 @@ export default function StaffAccountCard() {
       setTxOpen(true);
       setTxRows([]);
       setTxLoading(true);
-      const rows = await fetchLedgerTransactions({ GAS_URL, SECRET, branch, staff, mode });
-      setTxRows(rows);
-      // Lazy-enrich names for JC rows missing customerName (older entries)
-      try {
-        const missing = rows.filter(r => !r.customerName && String(r.sourceType||'').toLowerCase()==='jc');
-        if (missing.length) {
-          const filled = await Promise.all(rows.map(async (r) => {
-            if (r.customerName || String(r.sourceType||'').toLowerCase() !== 'jc') return r;
-            try {
-              const payload = SECRET ? { action:'search', mode:'jc', query: String(r.sourceId||''), secret: SECRET } : { action:'search', mode:'jc', query: String(r.sourceId||'') };
-              const resp = await saveJobcardViaWebhook({ webhookUrl: GAS_URL, method:'GET', payload });
-              const js = resp?.data || resp || {};
-              const first = Array.isArray(js.rows) && js.rows.length ? js.rows[0] : null;
-              const nm = first?.values?.Customer_Name || first?.payload?.formValues?.custName || '';
-              return nm ? { ...r, customerName: nm } : r;
-            } catch { return r; }
-          }));
-          setTxRows(filled);
-        }
-      } catch { /* keep base rows */ }
+      if (txCache?.loaded) {
+        setTxRows(mode === 'cash' ? txCache.cash : txCache.online);
+        return;
+      }
+      const allRows = await fetchLedgerTransactions({ GAS_URL, SECRET, branch, staff, mode: 'all' });
+      const nextCache = splitTransactionsByMode(allRows);
+      setTxCache(nextCache);
+      setTxRows(mode === 'cash' ? nextCache.cash : nextCache.online);
     } catch { message.error('Could not load transactions'); }
     finally { setTxLoading(false); }
   };

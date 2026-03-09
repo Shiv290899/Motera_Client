@@ -81,11 +81,16 @@ export default function FetchQuot({
   };
 
   const normalizePayloadShape = (raw) => {
-    // If our app saved the payload, it's already in the right shape.
-    if (raw && raw.formValues) return raw;
-
-    // Fallback minimal object when payload missing (very old rows)
-    return {
+    const firstNonEmpty = (...vals) => {
+      for (const v of vals) {
+        if (v === undefined || v === null) continue;
+        const s = String(v).trim();
+        if (s) return s;
+      }
+      return "";
+    };
+    const toNum = (v) => Number(String(v ?? 0).replace(/[,₹\s]/g, "")) || 0;
+    const withDefaults = (base = {}) => ({
       version: 0,
       brand: "MOTERA",
       mode: "cash",
@@ -98,8 +103,8 @@ export default function FetchQuot({
       company: "",
       model: "",
       variant: "",
-      branch: "", // may be injected from sheet later
-      followUp: { enabled: false, at: null, notes: "", status: 'pending' },
+      branch: "",
+      followUp: { enabled: false, at: null, notes: "", status: "pending" },
       formValues: {
         serialNo: "",
         name: "",
@@ -111,10 +116,60 @@ export default function FetchQuot({
         onRoadPrice: 0,
         executive: EXECUTIVES[0]?.name || "",
         remarks: "",
-        branch: "", // may be injected from sheet later
+        branch: "",
       },
       extraVehicles: [],
-    };
+      ...base,
+    });
+
+    // Unwrap common wrappers
+    const core =
+      (raw?.data && typeof raw.data === "object" ? raw.data : null) ||
+      (raw?.payload && typeof raw.payload === "object" ? raw.payload : null) ||
+      raw ||
+      {};
+
+    // If our app saved the payload, it should already have formValues.
+    if (core && typeof core === "object" && core.formValues) {
+      return withDefaults(core);
+    }
+
+    // Fallback from values-like shapes (legacy/mixed rows).
+    const values = (core && typeof core === "object" && core.values && typeof core.values === "object")
+      ? core.values
+      : (raw?.values && typeof raw.values === "object" ? raw.values : {});
+    if (values && Object.keys(values).length) {
+      const mapped = withDefaults({
+        serialNo: firstNonEmpty(values.serialNo, values.Quotation_ID, values["Quotation_ID"], values["Quotation No"], values["Quotation No."]),
+        company: firstNonEmpty(values.company, values.Company),
+        model: firstNonEmpty(values.bikeModel, values.Model),
+        variant: firstNonEmpty(values.variant, values.Variant),
+        branch: firstNonEmpty(values.branch, values.Branch, values["Branch Name"]),
+        onRoadPrice: toNum(values.onRoadPrice || values.OnRoadPrice || values["On-Road Price"]),
+        downPayment: toNum(values.downPayment || values.DownPayment || values["Down Payment"]),
+        formValues: {
+          serialNo: firstNonEmpty(values.serialNo, values.Quotation_ID, values["Quotation_ID"], values["Quotation No"], values["Quotation No."]),
+          name: firstNonEmpty(values.name, values.Customer_Name, values["Customer_Name"], values["Customer Name"], values["Customer_Name "]),
+          mobile: firstNonEmpty(values.mobile, values.Mobile, values["Mobile Number"], values.Phone),
+          address: firstNonEmpty(values.address, values.Address),
+          company: firstNonEmpty(values.company, values.Company),
+          bikeModel: firstNonEmpty(values.bikeModel, values.Model),
+          variant: firstNonEmpty(values.variant, values.Variant),
+          onRoadPrice: toNum(values.onRoadPrice || values.OnRoadPrice || values["On-Road Price"]),
+          downPayment: toNum(values.downPayment || values.DownPayment || values["Down Payment"]),
+          executive: firstNonEmpty(values.executive, values.Executive_Name, values["Executive Name"], EXECUTIVES[0]?.name),
+          remarks: firstNonEmpty(values.remarks, values.Remarks),
+          branch: firstNonEmpty(values.branch, values.Branch, values["Branch Name"]),
+        },
+      });
+      return mapped;
+    }
+
+    // If our app saved the payload, it's already in the right shape.
+    if (raw && raw.formValues) return withDefaults(raw);
+
+    // Fallback minimal object when payload missing (very old rows)
+    return withDefaults();
   };
 
   const pickTimingValue = (...vals) => {

@@ -1,360 +1,113 @@
-// src/Pages/About.jsx
-import React from "react"; // React core
-import { getOwnerOrgName } from "../utils/ownerConfig";
-// ↓ Ant Design UI imports
+import React from "react";
+import { Row, Col, Card, Typography, Tag, Divider, Button } from "antd";
 import {
-  Typography,        // Titles, Paragraph, Text
-  Row,               // Grid row (responsive)
-  Col,               // Grid column (responsive)
-  Card,              // Cards
-  Timeline,          // Timeline
-  Statistic,         // Stats tiles
-  Descriptions,      // Key-value facts
-  Tag,               // Colored labels
-  Button,            // CTA buttons
-  Divider,           // Section separator
-  Grid,              // AntD responsive hooks (useBreakpoint)
-  Carousel,          // Reviews carousel
-  Rate,              // Star rating
-} from "antd";       // Import all from antd
-// ↓ Icons
-import {
-  FlagOutlined,
-  EnvironmentOutlined,
-  ThunderboltOutlined,
-  SmileOutlined,
-  CheckCircleOutlined,
   RocketOutlined,
-  TrophyOutlined,
   TeamOutlined,
+  EnvironmentOutlined,
   ToolOutlined,
-  AimOutlined,
-} from "@ant-design/icons"; // AntD icons
+  CheckCircleOutlined,
+} from "@ant-design/icons";
+import { Link } from "react-router-dom";
+import { getOwnerOrgName } from "../utils/ownerConfig";
 
-const { Title, Paragraph, Text } = Typography; // Shorthands for typography
-const { useBreakpoint } = Grid;                // Hook to detect breakpoints
+const { Title, Paragraph, Text } = Typography;
 
-export default function About() { // Default export of the About page
+export default function About() {
   const orgName = getOwnerOrgName() || "Motera";
-  // ---------- RESPONSIVE BREAKPOINTS ----------
-  const bp = useBreakpoint();                    // { xs, sm, md, lg, xl, xxl } booleans
-  // Decide device buckets
-  const isMobile = !!bp.xs && !bp.md;            // < md
-  const isTablet = !!bp.md && !bp.lg;            // md only                     // ≥ lg
 
-  // ---------- DATA ----------
-  const facts = [                                // Quick facts for Descriptions
-    { label: "Founded", value: "Aug 2022" },     // Founded month/year
-    { label: "Headquarters", value: "Bengaluru" },// HQ city
-    { label: "Focus", value: "Sales & Service" },
-    { label: "Promise", value: "Transparent ownership" },
-    { label: "Vision", value: "Rider-first experience" },
-  ];
-
-  const timeline = [                             // Growth timeline items
-    { year: "2022", title: "Year 1", desc: "Launched in Bengaluru with a promise of transparent buying and dependable after‑sales.", stat: "Launch" },
-    { year: "2023", title: "Year 2", desc: "Expanded service capacity and streamlined delivery with customer-first processes.", stat: "Scale" },
-    { year: "2024", title: "Year 3", desc: "Strengthened teams and standardized service quality end‑to‑end.", stat: "Quality" },
-    { year: "2025", title: "Year 4", desc: "Operational excellence and faster turnaround for riders across the city.", stat: "Speed" },
-    { year: "Next", title: "Momentum", desc: "Investing in better experiences, smarter tools, and consistent care.", stat: "Future" },
-  ];
-
-  const whyUs = [                                // Why choose us cards
-    { icon: <TrophyOutlined />, title: "Proven Track Record", desc: "Steady growth powered by customer trust and repeat riders." }, // Card 1
-    { icon: <SmileOutlined />, title: "Customer-First", desc: "Every decision—from inventory to processes—centers your needs." },               // Card 2
-    { icon: <ToolOutlined />, title: "Skilled Teams", desc: "Friendly advisors & trained technicians using only genuine parts." },              // Card 3
-    { icon: <EnvironmentOutlined />, title: "Close to You", desc: "Easy access to sales & service when you need it." },                // Card 4
-    { icon: <CheckCircleOutlined />, title: "Consistent Quality", desc: `Every team upholds the same high ${orgName} standard.` },       // Card 5
-  ];
-
-  const values = [
-    { key: 'trust', color: 'linear-gradient(135deg,#ec4899,#f59e0b)', title: 'Trust', text: 'We do the right thing—always. Clear estimates, honest advice, dependable delivery.' },
-    { key: 'transparency', color: 'linear-gradient(135deg,#22d3ee,#6366f1)', title: 'Transparency', text: 'No surprises. Upfront pricing, live updates, and plain‑language communication.' },
-    { key: 'care', color: 'linear-gradient(135deg,#10b981,#84cc16)', title: 'Care', text: 'Warm guidance before and after purchase. Genuine spares and meticulous workmanship.' },
-  ];
-
-  const reviews = [
-    { name: 'Arun K', rating: 5, text: 'Super smooth delivery and the team patiently clarified every doubt. Service follow‑ups are on time.' },
-    { name: 'Meghana S', rating: 5, text: 'Transparent pricing and no hidden charges. Loved the experience—highly recommended!' },
-    { name: 'Ravi P', rating: 4.5, text: 'Quick turnaround for service and genuine parts. Professional and friendly staff.' },
-  ];
-
-  // ---------- STYLES (responsive via breakpoints) ----------
-  const heroHeight = isMobile ? 300 : isTablet ? 360 : 420; // Adaptive hero height
-  const heroTitleSize = isMobile ? 28 : isTablet ? 36 : 44; // Adaptive H1 size
-  const heroSubSize = isMobile ? 14 : isTablet ? 16 : 18;   // Adaptive subtitle size
-
-  const styles = {                                // Inline style object
-    hero: {
-      position: "relative",                       // Needed for overlay
-      minHeight: heroHeight,                      // Responsive height
-      borderRadius: 16,                           // Rounded corners
-      overflow: "hidden",                         // Clip overlay edges
-      background:
-        "url('https://images.unsplash.com/photo-1517336714731-489689fd1ca8?q=80&w=2100&auto=format&fit=crop') center / cover no-repeat", // Background image
-      display: "flex",                            // Center content
-      alignItems: "center",                       // Vertically center
+  const cards = [
+    {
+      icon: <ToolOutlined />,
+      title: "What is Motera?",
+      text: "Motera is showroom operations software for multi-brand two-wheeler showrooms. It helps teams handle quotation, job card, booking, stock and follow-up in one place.",
     },
-    heroOverlay: {
-      position: "absolute",                       // Cover entire hero
-      inset: 0,                                   // top/right/bottom/left = 0
-      background: "linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0.35))", // Darken image
+    {
+      icon: <TeamOutlined />,
+      title: "Who built Motera?",
+      text: "Built by a 6-member NITK founding team.",
     },
-    heroContent: {
-      position: "relative",                       // Sit above overlay
-      color: "#fff",                              // White text
-      padding: isMobile ? "36px 16px" : "56px 24px", // Responsive padding
-      width: "100%",                              // Full width container
-      maxWidth: 1180,                             // Center cap
-      margin: "0 auto",                           // Center horizontally
-      textAlign: isMobile ? "center" : "left",    // Center text on mobile
+    {
+      icon: <RocketOutlined />,
+      title: "Why we started",
+      text: "The idea came after visiting a real showroom and seeing manual work in daily operations. We built Motera to make showroom work simple and fast.",
     },
-    heroBadge: {
-      background: "rgba(255,255,255,0.92)",       // Light badge
-      color: "#e11d48",                           // Brand magenta
-      borderRadius: 999,                          // Pill
-      padding: "6px 12px",                        // Spacing
-      fontWeight: 700,                            // Bold
-      fontSize: 12,                               // Small
-      display: "inline-block",                    // Inline box
-      border: "1px solid rgba(225,29,72,0.2)",    // Subtle border
-      marginBottom: 8,                            // Space under badge
-    },
-    section: { padding: isMobile ? "28px 0" : "40px 0" }, // Section vertical rhythm
-    container: { maxWidth: 1180, margin: "0 auto", padding: "0 16px" }, // Page container
-    muted: { color: "rgba(0,0,0,0.45)" },         // Muted text color
-    valueCard: (bg) => ({
-      background: bg,
-      color: '#fff',
-      border: 'none',
-      boxShadow: '0 10px 24px rgba(0,0,0,.12)',
-      height: '100%',
-    }),
-    valueTitle: { color: '#fff', marginBottom: 6 },
-    reviewCard: { maxWidth: 760, margin: '0 auto', textAlign: 'center', padding: isMobile ? 12 : 16 },
-  };
+  ];
 
-  return (                                        // Component render
-    <main>                                        {/* Semantic main wrapper */}
-      {/* HERO */}
-      <section style={styles.hero}>               {/* Visual hero section */}
-        <div style={styles.heroOverlay} />        {/* Dark overlay */}
-        <div style={styles.heroContent}>          {/* Text block container */}
-          <span style={styles.heroBadge}>Since 2022 • Bengaluru</span> {/* Small badge */}
-          <Title
-            level={1}                              // H1
-            style={{ color: "#fff", marginTop: 8, marginBottom: 10, fontSize: heroTitleSize }} // Responsive font
-          >
-            About {orgName}                    {/* Page title */}
-          </Title>
-          <Paragraph
-            style={{ color: "#fff", opacity: 0.95, maxWidth: 860, fontSize: heroSubSize }} // Responsive subtitle
-          >
-            {orgName} began with a bold mission: redefine the
-            two-wheeler buying and ownership experience through trust, transparency, and joyful service.
-          </Paragraph>
-          <Tag color="magenta" style={{ fontWeight: 700 }}> {/* Badge line */}
-            <ThunderboltOutlined /> Fast-growing • Customer-first • Trusted
+  const quickFacts = [
+    ["Started", "August 2025"],
+    ["Headquarters", "Bangalore"],
+    ["Focus", "Multi-brand two-wheeler showrooms"],
+    ["Team", "6 members (NITK)"],
+    ["Type", "Showroom operations software"],
+  ];
+
+  const timeline = [
+    {
+      title: "Idea Stage",
+      desc: "Showroom visit -> manual process pain points identified.",
+    },
+    {
+      title: "Team Formation",
+      desc: "6-member NITK team aligned on product vision.",
+    },
+    {
+      title: "Build & Test",
+      desc: "Core modules built: quotation, job card, stock, follow-up, user roles.",
+    },
+    {
+      title: "Launch",
+      desc: "Started in August 2025 with Bangalore as base.",
+    },
+  ];
+
+  return (
+    <main style={{ background: "#f8fafc", minHeight: "100vh" }}>
+      <section
+        style={{
+          background:
+            "linear-gradient(120deg, #0f172a 0%, #1e293b 45%, #1d4ed8 100%)",
+          color: "#fff",
+          padding: "54px 16px 40px",
+        }}
+      >
+        <div style={{ maxWidth: 1120, margin: "0 auto" }}>
+          <Tag color="gold" style={{ fontWeight: 700, marginBottom: 10 }}>
+            About {orgName}
           </Tag>
-        </div>
-      </section>
-
-      {/* STORY + FACTS */}
-      <section style={styles.section}>            {/* Padded section */}
-        <div style={styles.container}>            {/* Centered container */}
-          <Row gutter={[16, 16]} align="stretch">  {/* Stretch columns to equal height */}
-            <Col xs={24} md={14}>                 {/* Story card: full on mobile, 14/24 on md+ */}
-              <Card bordered>                     {/* AntD card */}
-                <Title level={2} style={{ marginBottom: 8 }}>
-                  Our Story                         {/* Section title */}
-                </Title>
-                <Paragraph>
-                  In August 2022, {orgName} opened its doors in Bengaluru. From day one, we
-                  focused on more than vehicles—we built an experience. Our founder rolled up his
-                  sleeves to set up operations from scratch: sourcing, layout, hiring, training,
-                  and crafting processes rooted in <Text strong>trust</Text>,{" "}
-                  <Text strong>transparency</Text>, and <Text strong>care</Text>. Each satisfied
-                  rider became an ambassador, and our reputation accelerated.
-                </Paragraph>
-                <Paragraph>
-                  Today, {orgName} continues to grow its capabilities with a focus on speed, quality,
-                  and transparent service. Our long‑term vision is simple: make premium two‑wheeler
-                  ownership effortless for every rider.
-                </Paragraph>
-
-                <Divider style={{ margin: isMobile ? "12px 0" : "16px 0" }} /> {/* Compact divider on mobile */}
-
-                <Row gutter={[16, 16]}>           {/* Stats grid */}
-                  <Col xs={12} sm={6}>            {/* 2-up on mobile, 4-up on sm+ */}
-                    <Statistic title="Year 1" value={2022} />
-                  </Col>
-                  <Col xs={12} sm={6}>
-                    <Statistic title="Year 2" value={2023} />
-                  </Col>
-                  <Col xs={12} sm={6}>
-                    <Statistic title="Year 3" value={2024} />
-                  </Col>
-                  <Col xs={12} sm={6}>
-                    <Statistic title="Year 4" value={2025} />
-                  </Col>
-                </Row>
-              </Card>
-            </Col>
-
-            <Col xs={24} md={10}>                 {/* Facts card: full on mobile, 10/24 on md+ */}
-              <Card bordered title="Quick Facts" extra={<FlagOutlined />}>
-                <Descriptions
-                  column={isMobile ? 1 : 1}       // Keep 1 column; readable on all devices
-                  colon
-                  size={isMobile ? "small" : "middle"} // Smaller density on mobile
-                  labelStyle={{ width: 140, color: "rgba(0,0,0,0.65)" }} // Label look
-                >
-                  {facts.map((f) => (              // Map facts to items
-                    <Descriptions.Item key={f.label} label={f.label}>
-                      <Text strong>{f.value}</Text>
-                    </Descriptions.Item>
-                  ))}
-                </Descriptions>
-              </Card>
-            </Col>
-          </Row>
-        </div>
-      </section>
-
-      {/* GROWTH TIMELINE */}
-      <section style={{ ...styles.section, background: "#faf6f8" }}> {/* Themed background */}
-        <div style={styles.container}>            {/* Centered container */}
-          <Title level={2} style={{ textAlign: "center", marginBottom: 0 }}>
-            Growth Timeline                           {/* Section heading */}
+          <Title level={1} style={{ color: "#fff", margin: 0 }}>
+            Built for Real Showroom Work
           </Title>
-          <Paragraph style={{ textAlign: "center", ...styles.muted }}>
-            Nearly 3× scale-up year over year         {/* Subheading */}
+          <Paragraph style={{ color: "#dbeafe", maxWidth: 880, marginTop: 10, fontSize: 16 }}>
+            {orgName} is not a bike promotion website. It is operations software made for
+            two-wheeler showroom teams to run daily business with clarity.
           </Paragraph>
-
-          <Row gutter={[16, 16]} align="stretch">  {/* Stretch mission/vision for alignment */}
-            <Col span={24}>                         {/* Full-width timeline card */}
-              <Card bordered>
-                <Timeline
-                  mode={isMobile ? "left" : "alternate"} // Vertical left on mobile, alternate on larger
-                  items={timeline.map((t) => ({     // Convert data to Timeline items
-                    label: <Tag color="magenta">{t.year}</Tag>, // Year tag
-                    children: (                     // Body content
-                      <div>
-                        <Title level={4} style={{ marginBottom: 4 }}>
-                          {t.title}
-                        </Title>
-                        <Paragraph style={{ marginBottom: 8 }}>{t.desc}</Paragraph>
-                        <Tag color="red">
-                          <RocketOutlined /> Milestone: <Text strong>{t.stat}</Text>
-                        </Tag>
-                      </div>
-                    ),
-                    dot: <AimOutlined style={{ color: "#e11d48" }} />, // Custom dot
-                  }))}
-                />
-              </Card>
-            </Col>
-          </Row>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
+            <Tag color="processing">Quotations</Tag>
+            <Tag color="processing">Job Cards</Tag>
+            <Tag color="processing">Bookings</Tag>
+            <Tag color="processing">Stock Updates</Tag>
+            <Tag color="processing">Follow-ups</Tag>
+          </div>
         </div>
       </section>
 
-      {/* MISSION & VISION */}
-      <section style={styles.section}>            {/* Padded section */}
-        <div style={styles.container}>            {/* Centered container */}
-          <Row gutter={[16, 16]} justify="center" align="stretch"> {/* Center last row; equal heights */}
-            <Col xs={24} md={12}>                 {/* Mission card: stacks on mobile */}
-              <Card bordered title="Our Mission" extra={<CheckCircleOutlined />}>
-                <ul style={{ margin: 0, paddingLeft: 18 }}>
-                  <li>Deliver excellence at every touchpoint</li>
-                  <li>Transparent, fair pricing—no surprises</li>
-                  <li>Service you can trust with genuine parts</li>
-                  <li>Continuous innovation for convenience</li>
-                  <li>Create happy customers, not just sales</li>
-                </ul>
-              </Card>
-            </Col>
-            <Col xs={24} md={12}>                 {/* Vision card: side-by-side on md+ */}
-              <Card bordered title="Our Vision" extra={<RocketOutlined />}>
-                <Paragraph style={{ marginBottom: 0 }}>
-                  To be the most trusted two-wheeler brand in Bengaluru and beyond—recognized
-                  for quality vehicles, delightful service, and an ownership experience that
-                  feels effortless. Bringing {orgName} within 15–20 minutes of every rider.
-                </Paragraph>
-              </Card>
-            </Col>
-          </Row>
-        </div>
-      </section>
-
-      {/* VALUES */}
-      <section style={{ ...styles.section, background: '#0f172a' }}>
-        <div style={styles.container}>
-          <Title level={2} style={{ textAlign: 'center', color: '#e2e8f0', marginBottom: 6 }}>Our Values</Title>
-          <Paragraph style={{ textAlign: 'center', color: '#94a3b8', marginBottom: 18 }}>The principles behind every interaction</Paragraph>
-          <Row gutter={[16,16]} justify="center" align="stretch">
-            {values.map(v => (
-              <Col key={v.key} xs={24} sm={12} md={8}>
-                <Card hoverable style={styles.valueCard(v.color)}>
-                  <Title level={3} style={styles.valueTitle}>{v.title}</Title>
-                  <Paragraph style={{ color: 'rgba(255,255,255,.9)', margin: 0 }}>{v.text}</Paragraph>
-                </Card>
-              </Col>
-            ))}
-          </Row>
-        </div>
-      </section>
-
-      {/* REVIEWS */}
-      <section style={styles.section}>
-        <div style={styles.container}>
-          <Title level={2} style={{ textAlign: 'center', marginBottom: 6 }}>What Customers Say</Title>
-          <Paragraph style={{ textAlign: 'center', ...styles.muted, marginBottom: 18 }}>Real feedback from recent visits</Paragraph>
-          <Carousel autoplay dots draggable adaptiveHeight>
-            {reviews.map((r,i) => (
-              <div key={i}>
-                <Card bordered style={styles.reviewCard}>
-                  <Rate disabled allowHalf defaultValue={r.rating} />
-                  <Paragraph style={{ fontSize: isMobile ? 14 : 16, marginTop: 8 }}>{r.text}</Paragraph>
-                  <Text type="secondary">— {r.name}</Text>
-                </Card>
-              </div>
-            ))}
-          </Carousel>
-        </div>
-      </section>
-
-      {/* WHY CHOOSE US */}
-      <section style={{ ...styles.section, background: "#faf6f8" }}> {/* Themed background */}
-        <div style={styles.container}>            {/* Centered container */}
-          <Title level={2} style={{ textAlign: "center" }}>
-            Why Riders Choose {orgName}          {/* Section title */}
-          </Title>
-
+      <section style={{ padding: "30px 16px" }}>
+        <div style={{ maxWidth: 1120, margin: "0 auto" }}>
           <Row gutter={[16, 16]}>
-            {whyUs.map((card) => (                 // Map cards
-              <Col
-                key={card.title}
-                xs={24}                            // 1 per row on mobile
-                sm={12}                            // 2 per row on small
-                md={12}                            // 2 per row on tablet
-                lg={8}                             // 3 per row on desktop
-                xl={6}                             // 4 per row on large desktop
-              >
+            {cards.map((c) => (
+              <Col xs={24} md={8} key={c.title}>
                 <Card
-                  bordered
-                  hoverable
-                  style={{ height: "100%", display: 'flex', flexDirection: 'column', textAlign: 'left' }} // Equal height + consistent alignment
-                  actions={[<SmileOutlined key="smile" />]} // Cute icon action
+                  bordered={false}
+                  style={{
+                    borderRadius: 14,
+                    height: "100%",
+                    boxShadow: "0 12px 28px rgba(2,6,23,0.08)",
+                    background: "linear-gradient(180deg, #ffffff, #f8fbff)",
+                  }}
                 >
-                  <div style={{ fontSize: 22, marginBottom: 8, color: "#e11d48" }}>
-                    {card.icon}                     {/* Icon */}
-                  </div>
-                  <Title level={4} style={{ marginBottom: 6 }}>
-                    {card.title}                    {/* Card title */}
-                  </Title>
-                  <Paragraph style={{ marginBottom: 0 }}>
-                    {card.desc}                     {/* Card description */}
-                  </Paragraph>
+                  <div style={{ color: "#2563eb", fontSize: 22, marginBottom: 8 }}>{c.icon}</div>
+                  <Title level={4} style={{ marginTop: 0 }}>{c.title}</Title>
+                  <Paragraph style={{ marginBottom: 0, color: "#334155" }}>{c.text}</Paragraph>
                 </Card>
               </Col>
             ))}
@@ -362,47 +115,127 @@ export default function About() { // Default export of the About page
         </div>
       </section>
 
-      {/* CTA */}
-      <section style={styles.section}>            {/* Final CTA section */}
-        <div
-          style={{
-            maxWidth: 820,                         // Narrower for readability
-            margin: "0 auto",                      // Center
-            textAlign: "center",                   // Center text
-            padding: "0 16px",                     // Side padding
-          }}
-        >
-          <Title level={isMobile ? 3 : 2}>        {/* Slightly smaller on mobile */}
-            Ride into the Future with Us           {/* CTA headline */}
-          </Title>
-          <Paragraph style={{ fontSize: isMobile ? 14 : 16 }}>
-            From first bike to lifelong service partner, we’re here with expertise, warmth,
-            and a genuine smile. Reach out anytime and feel the difference.
-          </Paragraph>
-          <div
+      <section style={{ padding: "8px 16px 30px" }}>
+        <div style={{ maxWidth: 1120, margin: "0 auto" }}>
+          <Row gutter={[16, 16]} align="stretch">
+            <Col xs={24} lg={10}>
+              <Card
+                title="Quick Facts"
+                bordered={false}
+                style={{
+                  height: "100%",
+                  borderRadius: 14,
+                  boxShadow: "0 12px 28px rgba(2,6,23,0.08)",
+                }}
+              >
+                {quickFacts.map(([label, value]) => (
+                  <div
+                    key={label}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      padding: "8px 0",
+                      borderBottom: "1px dashed #e2e8f0",
+                    }}
+                  >
+                    <Text style={{ color: "#64748b" }}>{label}</Text>
+                    <Text strong style={{ color: "#0f172a", textAlign: "right" }}>{value}</Text>
+                  </div>
+                ))}
+              </Card>
+            </Col>
+
+            <Col xs={24} lg={14}>
+              <Card
+                title="Our Story"
+                bordered={false}
+                style={{
+                  height: "100%",
+                  borderRadius: 14,
+                  boxShadow: "0 12px 28px rgba(2,6,23,0.08)",
+                }}
+              >
+                <Paragraph style={{ color: "#334155", fontSize: 15 }}>
+                  We started {orgName} in August 2025 from Bangalore.
+                  The idea came from a real showroom experience where we saw teams managing
+                  too many things manually.
+                </Paragraph>
+                <Paragraph style={{ color: "#334155", fontSize: 15 }}>
+                  Built by a 6-member NITK founding team, this product was created as one practical
+                  software solution for multi-brand two-wheeler showrooms.
+                </Paragraph>
+                <Paragraph style={{ color: "#334155", fontSize: 15, marginBottom: 0 }}>
+                  Promise: <Text strong>Make daily showroom operations simple, trackable and reliable.</Text>
+                </Paragraph>
+                <Paragraph style={{ color: "#334155", fontSize: 15, marginBottom: 0 }}>
+                  Vision: <Text strong>Become the most trusted operations software for two-wheeler showrooms.</Text>
+                </Paragraph>
+              </Card>
+            </Col>
+          </Row>
+        </div>
+      </section>
+
+      <section style={{ padding: "0 16px 34px" }}>
+        <div style={{ maxWidth: 1120, margin: "0 auto" }}>
+          <Card
+            title="How We Built It"
+            bordered={false}
+            style={{ borderRadius: 14, boxShadow: "0 12px 28px rgba(2,6,23,0.08)" }}
+          >
+            <Row gutter={[12, 12]}>
+              {timeline.map((t, i) => (
+                <Col xs={24} sm={12} key={t.title}>
+                  <Card
+                    size="small"
+                    style={{
+                      borderRadius: 10,
+                      border: "1px solid #dbeafe",
+                      background: "#f8fbff",
+                    }}
+                  >
+                    <Text strong style={{ color: "#1d4ed8" }}>Step {i + 1}: {t.title}</Text>
+                    <Paragraph style={{ marginTop: 6, marginBottom: 0, color: "#334155" }}>
+                      {t.desc}
+                    </Paragraph>
+                  </Card>
+                </Col>
+              ))}
+            </Row>
+          </Card>
+        </div>
+      </section>
+
+      <section style={{ padding: "0 16px 44px" }}>
+        <div style={{ maxWidth: 1120, margin: "0 auto" }}>
+          <Card
+            bordered={false}
             style={{
-              display: "flex",                     // Button row
-              gap: 12,                             // Space between buttons
-              justifyContent: "center",            // Centered buttons
-              flexWrap: "wrap",                    // Wrap on small screens
+              borderRadius: 14,
+              background: "linear-gradient(135deg, #dcfce7, #dbeafe)",
+              border: "1px solid #bfdbfe",
             }}
           >
-            <Button
-              type="primary"                       // Primary CTA
-              size={isMobile ? "middle" : "large"} // Smaller button on mobile
-              href="/contact"                      // Link to contact
-              icon={<EnvironmentOutlined />}       // Icon
-            >
-              Contact {orgName}                       {/* Button label */}
-            </Button>
-            <Button
-              size={isMobile ? "middle" : "large"} // Secondary size
-              href="/service"                      // Link to service
-              icon={<ToolOutlined />}              // Icon
-            >
-              Book a Service                        {/* Button label */}
-            </Button>
-          </div>
+            <Title level={3} style={{ marginTop: 0, marginBottom: 6 }}>
+              Let us show {orgName} for your showroom
+            </Title>
+            <Paragraph style={{ color: "#1f2937", marginBottom: 14 }}>
+              If you run a multi-brand two-wheeler showroom, we can set up a demo for your team.
+            </Paragraph>
+            <Divider style={{ margin: "10px 0 14px" }} />
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <Button type="primary" icon={<CheckCircleOutlined />}>
+                <Link to="/contact" style={{ color: "#fff" }}>Contact Team</Link>
+              </Button>
+              <Button icon={<EnvironmentOutlined />}>
+                Bangalore Headquarters
+              </Button>
+              <Button icon={<TeamOutlined />}>
+                Team of 6 (NITK)
+              </Button>
+            </div>
+          </Card>
         </div>
       </section>
     </main>

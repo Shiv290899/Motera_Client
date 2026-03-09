@@ -624,16 +624,7 @@ export default function JobCard({ initialValues = null } = {}) {
   const [postOpen, setPostOpen] = useState(false);
   const [prePrinting, setPrePrinting] = useState(false); // lock Pre-service print
   const [postSaving, setPostSaving] = useState(false); // lock Post-service save/print
-  const [ownerLocationQrUrl, setOwnerLocationQrUrl] = useState(() => {
-    try {
-      const raw = localStorage.getItem("user");
-      const u = raw ? JSON.parse(raw) : null;
-      const cfg = u?.ownerConfig || u?.metadata?.ownerConfig || u?.owner?.ownerConfig || {};
-      return resolveLocationQrImageUrl(cfg?.locationQrUrl || "");
-    } catch {
-      return "";
-    }
-  });
+  const [ownerLocationQrUrl, setOwnerLocationQrUrl] = useState("");
   const [whatsAppOpen, setWhatsAppOpen] = useState(false);
   const [whatsAppStep, setWhatsAppStep] = useState(1);
   const [whatsAppDone, setWhatsAppDone] = useState({ customer: false, mechanic: false, pre: false });
@@ -656,6 +647,7 @@ export default function JobCard({ initialValues = null } = {}) {
   const [inlineAutoSearch, setInlineAutoSearch] = useState(null);
   const [inlineFetchLoading, setInlineFetchLoading] = useState(false);
   const [inlineFetchTarget, setInlineFetchTarget] = useState(null);
+  const branchTeamFetchAttemptedRef = useRef(new Set());
   const lastAutoRegRef = useRef("");
   const autoFetchTimerRef = useRef(null);
   const regInputSourceRef = useRef("init");
@@ -732,7 +724,8 @@ export default function JobCard({ initialValues = null } = {}) {
         if (res?.success && res?.data) {
           try { localStorage.setItem("user", JSON.stringify(res.data)); } catch { /* ignore */ }
           const cfg = res.data?.ownerConfig || res.data?.metadata?.ownerConfig || res.data?.owner?.ownerConfig || {};
-          const nextQr = resolveLocationQrImageUrl(cfg?.locationQrUrl || "");
+          const qrSource = String(cfg?.locationQrUrl || cfg?.webhookUrl || "").trim();
+          const nextQr = resolveLocationQrImageUrl(qrSource);
           setOwnerLocationQrUrl(nextQr);
         }
       } catch {
@@ -952,12 +945,14 @@ export default function JobCard({ initialValues = null } = {}) {
                 const res = await listBranchesPublic({ status: 'active', limit: 500 });
                 if (res?.success && Array.isArray(res?.data?.items)) {
                   const activeBranches = res.data.items.filter((b) => String(b?.status || '').toLowerCase() === 'active');
-                const all = activeBranches.map((b) => ({
-                    id: String(b.id || b._id || ''),
-                    name: toCaps(b.name),
-                    code: b.code ? String(b.code).toUpperCase() : '',
-                    team: b.team || {},
-                  }));
+                  const all = activeBranches
+                    .map((b) => ({
+                      id: _pickId(b?.id) || _pickId(b?._id) || "",
+                      name: toCaps(b.name),
+                      code: b.code ? String(b.code).toUpperCase() : "",
+                      team: b.team || {},
+                    }))
+                    .filter((b) => b.id && b.name);
                   setAllowedBranches(all);
                 }
               } catch { /* ignore */ }
@@ -975,7 +970,7 @@ export default function JobCard({ initialValues = null } = {}) {
                   if (!b) return;
                   const statusLc = typeof b === 'string' ? '' : String(b?.status || '').toLowerCase();
                   if (statusLc && statusLc !== 'active') return;
-                  const id = (b && (b._id || b.id || b.$oid || b)) || '';
+                  const id = _pickId(b?._id) || _pickId(b?.id) || _pickId(b) || '';
                   const nameRaw = typeof b === 'string' ? '' : (b?.name || '');
                   const name = toCaps(nameRaw);
                   const code = typeof b === 'string' ? '' : (b?.code || '');
@@ -1001,9 +996,9 @@ export default function JobCard({ initialValues = null } = {}) {
           if (codeFromUser) { setBranchCode(codeFromUser); try { form.setFieldsValue({ branchCode: codeFromUser }); } catch {
             //gef
           } }
-          const branchIdVar = (user?.formDefaults && (user.formDefaults.branchId?._id || user.formDefaults.branchId || null))
-            || (user?.primaryBranch && (user.primaryBranch?._id || user.primaryBranch || null))
-            || (Array.isArray(user?.branches) && user.branches.length ? (user.branches[0]?._id || user.branches[0] || null) : null);
+          const branchIdVar = _pickId(user?.formDefaults?.branchId)
+            || _pickId(user?.primaryBranch)
+            || (Array.isArray(user?.branches) && user.branches.length ? _pickId(user.branches[0]) : null);
               if (branchIdVar) {
                 try {
                   const br = await getBranch(String(branchIdVar)).catch(() => null);
@@ -1066,14 +1061,20 @@ export default function JobCard({ initialValues = null } = {}) {
       setBranchTeam({ executives: [], mechanics: [] });
       return;
     }
+    const key = String(branchId);
+    if (branchTeamFetchAttemptedRef.current.has(key)) {
+      return;
+    }
+    branchTeamFetchAttemptedRef.current.add(key);
     try {
-      const res = await getBranch(String(branchId));
+      const res = await getBranch(key);
       if (res?.success && res?.data) {
         const team = res.data.team || {};
         setBranchTeam(team);
         attachTeamToBranch(res.data.id, team);
       }
     } catch {
+      branchTeamFetchAttemptedRef.current.delete(key);
       setBranchTeam({ executives: [], mechanics: [] });
     }
   }, [attachTeamToBranch]);

@@ -1947,9 +1947,20 @@ const extractRawPayloadObject = (...sources) => {
   );
 
   const renderBookingBalance = (r) => (
-    <div style={stackStyle}>
+    <div style={{ ...stackStyle, gap: 6 }}>
       <div style={lineStyle}>{formatCurrency(r.balanceValue)}</div>
       <div style={smallLineStyle}>{r.balanceLabel || 'Balance'}</div>
+      <Button
+        size="small"
+        type="primary"
+        style={{ ...actionBtnStyle, width: 'fit-content' }}
+        onClick={(event) => {
+          event.stopPropagation();
+          handleBookingRowClick(r);
+        }}
+      >
+        Collect
+      </Button>
     </div>
   );
 
@@ -2474,9 +2485,8 @@ const extractRawPayloadObject = (...sources) => {
               onClick: (event) => {
                 if (!isBooking) return;
                 if (shouldSkipRowClick(event)) return;
-                handleBookingRowClick(row);
               },
-              style: isBooking ? { cursor: 'pointer' } : undefined,
+              style: isBooking ? { cursor: 'default' } : undefined,
             })}
             locale={{
               emptyText: (
