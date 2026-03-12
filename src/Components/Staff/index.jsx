@@ -1,5 +1,6 @@
 import React from "react";
-import { Tabs, Grid } from "antd";
+import { Tabs, Grid, Empty, Alert } from "antd";
+import { useSearchParams } from "react-router-dom";
 // Replaced Ant icons with simple emojis for clearer tab labels
 
 import Quotation from "../Quotation";
@@ -15,17 +16,19 @@ import useAnnouncementBadge from "../../hooks/useAnnouncementBadge";
 import { GetCurrentUser } from "../../apiCalls/users";
 import StaffAccountCard from "../StaffAccountCard";
 import { listBranchesPublic } from "../../apiCalls/branches";
-import { getTenantOwnerId } from "../../utils/ownerConfig";
+import { getTenantOwnerId, hasOwnerWebhookUrlConfigured } from "../../utils/ownerConfig";
 
 
 
 export default function Staff() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md; // < md considered mobile/tablet portrait
   const [branchName, setBranchName] = React.useState("");
   const [showStockFinder, setShowStockFinder] = React.useState(false);
+  const hasWebhook = hasOwnerWebhookUrlConfigured();
 
-  const container = { maxWidth: 1200, margin: "0 auto", padding: isMobile ? 12 : 16 };
+  const container = { width: "100%", maxWidth: "100%", margin: 0, padding: isMobile ? 12 : 16 };
   const wrap = { paddingTop: 12, width: "100%", overflowX: "auto", minWidth: 0 };
   const { hasNew, latestItem } = useAnnouncementBadge();
   const pillColor = (t) => (t === 'alert' ? '#fa541c' : t === 'warning' ? '#faad14' : '#2f54eb');
@@ -48,6 +51,19 @@ export default function Staff() {
       <span aria-hidden style={{ fontSize: 16 }}>{emoji}</span>
       <span>{text}</span>
     </span>
+  );
+
+  const noDataView = (
+    <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 20 }}>
+      <Alert
+        type="warning"
+        showIcon
+        message="Owner web app URL is not configured"
+        description="No operational data will be shown until owner sets webhook URL in profile."
+        style={{ marginBottom: 16 }}
+      />
+      <Empty description="No data" />
+    </div>
   );
 
   // Resolve branch name for the logged-in staff
@@ -81,7 +97,7 @@ export default function Staff() {
       label: tabLabel('🧾', "Quotation"),
       children: (
         <div style={wrap}>
-          <Quotation />
+          {hasWebhook ? <Quotation /> : noDataView}
         </div>
       ),
     },
@@ -90,7 +106,7 @@ export default function Staff() {
       label: tabLabel('🔧', "Job Card"),
       children: (
         <div style={wrap}>
-          <JobCard />
+          {hasWebhook ? <JobCard /> : noDataView}
         </div>
       ),
     },
@@ -99,7 +115,7 @@ export default function Staff() {
       label: tabLabel('📞', "Follow-ups"),
       children: (
         <div style={wrap}>
-          <FollowUpsTabs />
+          {hasWebhook ? <FollowUpsTabs /> : noDataView}
         </div>
       ),
     },
@@ -108,7 +124,7 @@ export default function Staff() {
       label: tabLabel('📅', "Booking"),
       children: (
         <div style={wrap}>
-          <BookingForm />
+          {hasWebhook ? <BookingForm /> : noDataView}
         </div>
       ),
     },
@@ -117,7 +133,7 @@ export default function Staff() {
       label: tabLabel('🏍️', "Vehicle Search"),
       children: (
         <div style={wrap}>
-          <VehicleSearch />
+          {hasWebhook ? <VehicleSearch /> : noDataView}
         </div>
       ),
     },
@@ -127,7 +143,7 @@ export default function Staff() {
           label: tabLabel('🔎', "Stock Finder"),
           children: (
             <div style={wrap}>
-              <InStockUpdate />
+              {hasWebhook ? <InStockUpdate /> : noDataView}
             </div>
           ),
         }]
@@ -137,7 +153,7 @@ export default function Staff() {
       label: tabLabel('📦', "Stock Update"),
       children: (
         <div style={wrap}>
-          <StockUpdate />
+          {hasWebhook ? <StockUpdate /> : noDataView}
         </div>
       ),
     },
@@ -151,7 +167,7 @@ export default function Staff() {
       ),
       children: (
         <div style={wrap}>
-          <MinorSales />
+          {hasWebhook ? <MinorSales /> : noDataView}
         </div>
       ),
     },
@@ -160,7 +176,7 @@ export default function Staff() {
       label: tabLabel('💼', 'Account'),
       children: (
         <div style={wrap}>
-          <StaffAccountCard />
+          {hasWebhook ? <StaffAccountCard /> : noDataView}
         </div>
       ),
     },
@@ -175,11 +191,14 @@ export default function Staff() {
       ),
       children: (
         <div style={wrap}>
-          <Announcements />
+          {hasWebhook ? <Announcements /> : noDataView}
         </div>
       ),
     },
   ];
+  const validTabKeys = React.useMemo(() => items.map((it) => it.key), [items]);
+  const requestedTab = searchParams.get("tab");
+  const activeTab = validTabKeys.includes(requestedTab) ? requestedTab : "quotation";
 
   return (
     <div style={container}>
@@ -218,7 +237,12 @@ export default function Staff() {
         ) : null}
       </h2>
       <Tabs
-        defaultActiveKey="quotation"
+        activeKey={activeTab}
+        onChange={(key) => {
+          const next = new URLSearchParams(searchParams);
+          next.set("tab", key);
+          setSearchParams(next, { replace: true });
+        }}
         items={items}
         tabPosition="top"
         size={isMobile ? "small" : "middle"}

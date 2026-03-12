@@ -1790,7 +1790,6 @@ const extractRawPayloadObject = (...sources) => {
   const renderJobcardStatusActions = (r) => {
     const status = String(r.status || '').toLowerCase();
     const isPending = status === 'pending';
-    const isCompleted = status === 'completed';
     const isInvoiceLoading = invoiceLoadingId === (r.jcNo || r.key || r.mobile || '');
     const miniStack = { display: 'flex', flexDirection: 'column', gap: 2, lineHeight: 1.1 };
     return (
@@ -1812,6 +1811,16 @@ const extractRawPayloadObject = (...sources) => {
               Call
             </Button>
           </Tooltip>
+          <Button
+            size="small"
+            type="default"
+            icon={<FileTextOutlined />}
+            loading={isInvoiceLoading}
+            style={actionBtnSecondaryStyle}
+            onClick={() => handleServiceInvoice(r)}
+          >
+            Service Invoice
+          </Button>
           {isPending ? (
             <Button
               size="small"
@@ -1821,20 +1830,7 @@ const extractRawPayloadObject = (...sources) => {
             >
               Post Service
             </Button>
-          ) : isCompleted ? (
-            <Button
-              size="small"
-              type="default"
-              icon={<FileTextOutlined />}
-              loading={isInvoiceLoading}
-              style={actionBtnSecondaryStyle}
-              onClick={() => handleServiceInvoice(r)}
-            >
-              Service Invoice
-            </Button>
-          ) : (
-            <span style={{ fontSize: 10, color: '#999' }}>—</span>
-          )}
+          ) : null}
         </div>
       </div>
     );

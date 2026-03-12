@@ -1,5 +1,6 @@
 import React from "react";
 import { Tabs, Grid } from "antd";
+import { useSearchParams } from "react-router-dom";
 import StockUpdate from "../StockUpdate";
 import Branches from "./Branches";
 import InStockUpdate from "../InStockUpdate";
@@ -16,9 +17,10 @@ import Analytics from "./Analytics";
 // Announcements tab/banner removed as requested
 
 export default function Admin() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
-  const container = { maxWidth: 1200, margin: "0 auto", padding: isMobile ? 12 : 16 };
+  const container = { width: "100%", maxWidth: "100%", margin: 0, padding: isMobile ? 12 : 16 };
 
   const { hasNew, latestItem } = useAnnouncementBadge();
   const pillColor = (t) => (t === 'alert' ? '#fa541c' : t === 'warning' ? '#faad14' : '#2f54eb');
@@ -38,12 +40,20 @@ export default function Admin() {
     // 9) Analytics & Reports, 10) Branch-level Sales, 11) Multi-branch Compare, 12) Sales Performance
     
   ];
+  const validTabKeys = React.useMemo(() => items.map((it) => it.key), [items]);
+  const requestedTab = searchParams.get("tab");
+  const activeTab = validTabKeys.includes(requestedTab) ? requestedTab : "branches";
 
   return (
     <div style={container}>
      
       <Tabs
-        defaultActiveKey="quotations"
+        activeKey={activeTab}
+        onChange={(key) => {
+          const next = new URLSearchParams(searchParams);
+          next.set("tab", key);
+          setSearchParams(next, { replace: true });
+        }}
         items={items}
         destroyInactiveTabPane
         size={isMobile ? "small" : "middle"}

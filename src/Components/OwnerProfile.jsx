@@ -1,9 +1,9 @@
 import React from "react";
 import dayjs from "dayjs";
-import { Card, Form, Input, InputNumber, Button, Typography, Space, message, Select, Divider, Checkbox } from "antd";
+import { Card, Form, Input, InputNumber, Button, Typography, Space, message, Select, Divider, Checkbox, Grid } from "antd";
 import { GetCurrentUser, UpdateOwnerProfile, CreateInviteLink } from "../apiCalls/users";
 import { listBranches } from "../apiCalls/branches";
-import { applyTemplatePlaceholders, normalizeImageUrl, normalizeOwnerFreeFittingsConfig, normalizeQuotationWhatsAppTemplate, resolveLocationQrImageUrl, toGoogleImageFallbackUrl, toRenderableImageUrl } from "../utils/ownerConfig";
+import { applyTemplatePlaceholders, normalizeImageUrl, normalizeOwnerFreeFittingsConfig, normalizeOwnerLabourConfig, normalizeQuotationWhatsAppTemplate, resolveLocationQrImageUrl, toGoogleImageFallbackUrl, toRenderableImageUrl } from "../utils/ownerConfig";
 
 const { Title, Text } = Typography;
 const ORG_FONT_FAMILY_OPTIONS = [
@@ -24,6 +24,14 @@ const ORG_NAME_COLOR_OPTIONS = [
   { label: "Navy", value: "#1e3a8a" },
   { label: "Maroon", value: "#7f1d1d" },
   { label: "Green", value: "#14532d" },
+];
+const REGIONAL_LANGUAGE_OPTIONS = [
+  { label: "Kannada", value: "kn" },
+  { label: "Hindi", value: "hi" },
+  { label: "Tamil", value: "ta" },
+  { label: "Telugu", value: "te" },
+  { label: "Malayalam", value: "ml" },
+  { label: "Marathi", value: "mr" },
 ];
 
 const readUser = () => {
@@ -60,6 +68,7 @@ const isValidAppsScriptWebhookUrl = (value) => {
   const v = normalizeWebhookUrl(value);
   return /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/i.test(v);
 };
+const DEFAULT_LOCATION_QR_URL = "https://drive.google.com/file/d/18BZVkOzS3xXChOsVsErEaBs6hEsLdMvr/view?usp=sharing";
 
 const getDefaultWaIntroLines = () => normalizeQuotationWhatsAppTemplate({}).introLines.join("\n");
 
@@ -105,10 +114,74 @@ const resolveFreeFittingsDefaultSelected = (ownerConfig) => {
   const cfg = normalizeOwnerFreeFittingsConfig(ownerConfig || {});
   return cfg.defaultSelected;
 };
+const normalizeLabourLine = (line) => {
+  const raw = String(line || "").trim();
+  if (!raw) return null;
+  const fromPipe = raw.split("|");
+  if (fromPipe.length >= 2) {
+    const desc = forceUpper(String(fromPipe[0] || "").trim());
+    const rateNum = Number(String(fromPipe.slice(1).join("|") || "").replace(/[^\d.]/g, ""));
+    if (!desc) return null;
+    return { desc, rate: Number.isFinite(rateNum) && rateNum >= 0 ? rateNum : 0 };
+  }
+  const match = raw.match(/^(.*?)(?:\s*[-:,]\s*)₹?\s*(\d+(?:\.\d+)?)$/);
+  if (match) {
+    const desc = forceUpper(String(match[1] || "").trim());
+    const rateNum = Number(match[2]);
+    if (!desc) return null;
+    return { desc, rate: Number.isFinite(rateNum) && rateNum >= 0 ? rateNum : 0 };
+  }
+  return { desc: forceUpper(raw), rate: 0 };
+};
+const toUniqueLabourRows = (value) => {
+  const seen = new Set();
+  return String(value || "")
+    .split(/\r?\n/g)
+    .map(normalizeLabourLine)
+    .filter(Boolean)
+    .filter((item) => {
+      const key = String(item.desc || "").trim().toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+};
+const formatLabourRowsValue = (rows) =>
+  (Array.isArray(rows) ? rows : [])
+    .map((item) => {
+      const desc = forceUpper(String(item?.desc || "").trim());
+      const rate = Number(item?.rate || 0);
+      if (!desc) return "";
+      return `${desc} | ${Math.max(0, Math.round(Number.isFinite(rate) ? rate : 0))}`;
+    })
+    .filter(Boolean)
+    .join("\n");
+const resolveLabourRowsValue = (ownerConfig, key) => {
+  const cfg = normalizeOwnerLabourConfig(ownerConfig || {});
+  return formatLabourRowsValue(cfg[key]);
+};
 
 const forceUpper = (value) => String(value || "").toUpperCase();
+const normalizeInviteUrlForCurrentOrigin = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const u = new URL(raw);
+    const isLocal = u.hostname === "localhost" || u.hostname === "127.0.0.1";
+    if (isLocal && typeof window !== "undefined" && window.location?.origin) {
+      const current = new URL(window.location.origin);
+      u.protocol = current.protocol;
+      u.host = current.host;
+    }
+    return u.toString();
+  } catch {
+    return raw;
+  }
+};
 
 export default function OwnerProfile() {
+  const screens = Grid.useBreakpoint();
+  const isMobile = !screens.md;
   const [form] = Form.useForm();
   const [saving, setSaving] = React.useState(false);
   const [user, setUser] = React.useState(() => readUser());
@@ -128,7 +201,6 @@ export default function OwnerProfile() {
     setFailed(true);
   }, []);
   const orgNamePreview = Form.useWatch("orgName", form);
-  const ownerNamePreview = Form.useWatch("name", form);
   const orgNameRegionalPreview = Form.useWatch("orgNameRegional", form);
   const orgAddrPreview = Form.useWatch("orgAddress", form);
   const orgAddressFontSizePtPreview = Form.useWatch("orgAddressFontSizePt", form);
@@ -152,6 +224,17 @@ export default function OwnerProfile() {
   const [branchOptions, setBranchOptions] = React.useState([]);
   const [copyingInvite, setCopyingInvite] = React.useState(false);
   const [sharingInvite, setSharingInvite] = React.useState(false);
+  const [translateTargetLang, setTranslateTargetLang] = React.useState("kn");
+
+  const openGoogleTranslateForOrgName = React.useCallback(() => {
+    const sourceText = String(form.getFieldValue("orgName") || "").trim();
+    if (!sourceText) {
+      message.warning("Enter Organization Name first");
+      return;
+    }
+    const url = `https://translate.google.com/?sl=en&tl=${encodeURIComponent(translateTargetLang)}&text=${encodeURIComponent(sourceText)}&op=translate`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }, [form, translateTargetLang]);
 
   const copyInviteLink = React.useCallback(async () => {
     const link = String(inviteUrl || "").trim();
@@ -253,7 +336,7 @@ export default function OwnerProfile() {
               ? res.data.ownerConfig.orgMobiles.join(" / ")
               : (res.data?.ownerConfig?.orgMobiles || ""),
             logoUrl: res.data?.ownerConfig?.logoUrl || "",
-            locationQrUrl: res.data?.ownerConfig?.locationQrUrl || "",
+            locationQrUrl: res.data?.ownerConfig?.locationQrUrl || DEFAULT_LOCATION_QR_URL,
             webhookUrl: res.data?.ownerConfig?.webhookUrl || "",
             processingFee: res.data?.ownerConfig?.processingFee ?? 8000,
             flatInterestRate: res.data?.ownerConfig?.flatInterestRate ?? 11,
@@ -264,6 +347,9 @@ export default function OwnerProfile() {
             ),
             freeFittingsOptions: resolveFreeFittingsOptionsValue(res.data?.ownerConfig),
             freeFittingsDefaultSelected: resolveFreeFittingsDefaultSelected(res.data?.ownerConfig),
+            labourScooterBase: resolveLabourRowsValue(res.data?.ownerConfig, "scooterBase"),
+            labourMotorcycleBase: resolveLabourRowsValue(res.data?.ownerConfig, "motorcycleBase"),
+            labourPaidAddons: resolveLabourRowsValue(res.data?.ownerConfig, "paidAddons"),
           });
       } else {
         const u = readUser();
@@ -288,7 +374,7 @@ export default function OwnerProfile() {
               ? u.ownerConfig.orgMobiles.join(" / ")
               : (u?.ownerConfig?.orgMobiles || ""),
             logoUrl: u?.ownerConfig?.logoUrl || "",
-            locationQrUrl: u?.ownerConfig?.locationQrUrl || "",
+            locationQrUrl: u?.ownerConfig?.locationQrUrl || DEFAULT_LOCATION_QR_URL,
             webhookUrl: u?.ownerConfig?.webhookUrl || "",
             processingFee: u?.ownerConfig?.processingFee ?? 8000,
             flatInterestRate: u?.ownerConfig?.flatInterestRate ?? 11,
@@ -299,6 +385,9 @@ export default function OwnerProfile() {
             ),
             freeFittingsOptions: resolveFreeFittingsOptionsValue(u?.ownerConfig),
             freeFittingsDefaultSelected: resolveFreeFittingsDefaultSelected(u?.ownerConfig),
+            labourScooterBase: resolveLabourRowsValue(u?.ownerConfig, "scooterBase"),
+            labourMotorcycleBase: resolveLabourRowsValue(u?.ownerConfig, "motorcycleBase"),
+            labourPaidAddons: resolveLabourRowsValue(u?.ownerConfig, "paidAddons"),
           });
         }
       }
@@ -326,6 +415,9 @@ export default function OwnerProfile() {
     try {
       const vals = await form.validateFields();
       const freeFittingsOptions = toUniqueLines(vals.freeFittingsOptions);
+      const labourScooterBase = toUniqueLabourRows(vals.labourScooterBase);
+      const labourMotorcycleBase = toUniqueLabourRows(vals.labourMotorcycleBase);
+      const labourPaidAddons = toUniqueLabourRows(vals.labourPaidAddons);
       setSaving(true);
       const res = await UpdateOwnerProfile({
         name: forceUpper(vals.name),
@@ -360,6 +452,9 @@ export default function OwnerProfile() {
         freeFittingsDefaultSelected: (Array.isArray(vals.freeFittingsDefaultSelected) ? vals.freeFittingsDefaultSelected : [])
           .map((v) => String(v || "").trim())
           .filter((v) => freeFittingsOptions.includes(v)),
+        labourScooterBase,
+        labourMotorcycleBase,
+        labourPaidAddons,
       });
       if (!res?.success) {
         message.error(res?.message || "Save failed");
@@ -411,11 +506,10 @@ export default function OwnerProfile() {
     locations: quotationWaLocationsPreview,
   });
   const orgNamePreviewUpper = forceUpper(orgNamePreview || "Organization Name");
-  const ownerNamePreviewUpper = forceUpper(ownerNamePreview || "Owner");
   const sectionStyle = {
     border: "1px solid #e6edf5",
     borderRadius: 12,
-    padding: 14,
+    padding: isMobile ? 10 : 14,
     background: "#fff",
     marginBottom: 12,
   };
@@ -457,9 +551,14 @@ export default function OwnerProfile() {
   ].join("\n");
 
   const parsedFreeFittingsOptions = toUniqueLines(freeFittingsOptionsPreview);
+  const previewSerialNo = "Q-ANDR-C9PN4W";
+  const previewDateText = dayjs().format("DD-MM-YYYY HH:mm");
+  // Match Quotation print content width (A4 210mm with 12mm side padding => ~186mm usable width).
+  const previewPaperWidth = 704;
+  const previewPaperZoom = 0.68;
 
   return (
-    <div style={{ maxWidth: 1560, margin: "0 auto", padding: "14px 18px 24px" }}>
+    <div style={{ maxWidth: 1560, margin: "0 auto", padding: isMobile ? "10px 10px 18px" : "14px 18px 24px" }}>
       <style>{`
         @media (max-width: 1100px) {
           .owner-profile-grid {
@@ -505,7 +604,7 @@ export default function OwnerProfile() {
               ? user.ownerConfig.orgMobiles.join(" / ")
               : (user?.ownerConfig?.orgMobiles || ""),
             logoUrl: user?.ownerConfig?.logoUrl || "",
-            locationQrUrl: user?.ownerConfig?.locationQrUrl || "",
+            locationQrUrl: user?.ownerConfig?.locationQrUrl || DEFAULT_LOCATION_QR_URL,
             webhookUrl: user?.ownerConfig?.webhookUrl || "",
             processingFee: user?.ownerConfig?.processingFee ?? 8000,
             flatInterestRate: user?.ownerConfig?.flatInterestRate ?? 11,
@@ -516,9 +615,12 @@ export default function OwnerProfile() {
             ),
             freeFittingsOptions: resolveFreeFittingsOptionsValue(user?.ownerConfig),
             freeFittingsDefaultSelected: resolveFreeFittingsDefaultSelected(user?.ownerConfig),
+            labourScooterBase: resolveLabourRowsValue(user?.ownerConfig, "scooterBase"),
+            labourMotorcycleBase: resolveLabourRowsValue(user?.ownerConfig, "motorcycleBase"),
+            labourPaidAddons: resolveLabourRowsValue(user?.ownerConfig, "paidAddons"),
           }}
         >
-          <div className="owner-profile-grid" style={{ display: "grid", gridTemplateColumns: "1.35fr 0.9fr", gap: 16, alignItems: "start" }}>
+          <div className="owner-profile-grid" style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.35fr 0.9fr", gap: isMobile ? 12 : 16, alignItems: "start" }}>
             <div>
               <div style={sectionStyle}>
                 <Title level={5} style={{ marginBottom: 6 }}>Basic Details</Title>
@@ -544,7 +646,7 @@ export default function OwnerProfile() {
                 </Form.Item>
 
                 <Title level={5} style={{ margin: "4px 0 8px" }}>Organization Name Style</Title>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(130px, 1fr))", gap: 10, marginBottom: 8 }}>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(4, minmax(130px, 1fr))", gap: 10, marginBottom: 8 }}>
                   <Form.Item label="Font Size (pt)" name="orgNameFontSizePt" style={{ marginBottom: 0 }}>
                     <InputNumber min={8} max={64} step={0.5} style={{ width: "100%" }} />
                   </Form.Item>
@@ -559,11 +661,23 @@ export default function OwnerProfile() {
                   </Form.Item>
                 </div>
 
-                <Form.Item label="Organization Name (Regional Language)" name="orgNameRegional">
-                  <Input placeholder="ಉದಾ: ಶ್ರೀ ಬಾಲಾಜಿ ಮೋಟರ್ಸ್" />
-                </Form.Item>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 170px auto", gap: 8, alignItems: "end" }}>
+                  <Form.Item label="Organization Name (Regional Language)" name="orgNameRegional" style={{ marginBottom: 0 }}>
+                    <Input placeholder="ಉದಾ: ಶ್ರೀ ಬಾಲಾಜಿ ಮೋಟರ್ಸ್" />
+                  </Form.Item>
+                  <Form.Item label="Language" style={{ marginBottom: 0 }}>
+                    <Select
+                      value={translateTargetLang}
+                      onChange={setTranslateTargetLang}
+                      options={REGIONAL_LANGUAGE_OPTIONS}
+                    />
+                  </Form.Item>
+                  <Button style={{ marginBottom: 0, width: isMobile ? "100%" : undefined }} onClick={openGoogleTranslateForOrgName}>
+                    Translate
+                  </Button>
+                </div>
                 {String(orgNameRegionalPreview || "").trim() ? (
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(130px, 1fr))", gap: 10, marginBottom: 8 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(3, minmax(130px, 1fr))", gap: 10, marginBottom: 8 }}>
                     <Form.Item label="Regional Size (pt)" name="orgNameRegionalFontSizePt" style={{ marginBottom: 0 }}>
                       <InputNumber min={8} max={64} step={0.5} style={{ width: "100%" }} />
                     </Form.Item>
@@ -586,7 +700,7 @@ export default function OwnerProfile() {
                   <Input.TextArea rows={2} placeholder="Organization address (print header)" />
                 </Form.Item>
 
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(130px, 1fr))", gap: 10, marginBottom: 8 }}>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(130px, 1fr))", gap: 10, marginBottom: 8 }}>
                   <Form.Item label="Address Size (pt)" name="orgAddressFontSizePt" style={{ marginBottom: 0 }}>
                     <InputNumber min={8} max={64} step={0.5} style={{ width: "100%" }} />
                   </Form.Item>
@@ -602,19 +716,20 @@ export default function OwnerProfile() {
                 <Form.List name="mechanics">
                   {(fields, { add, remove }) => (
                     <div style={{ marginBottom: 10 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8, flexWrap: isMobile ? "wrap" : "nowrap" }}>
                         <Text strong>Mechanics (for Job Card allotted mechanic)</Text>
-                        <Button type="dashed" onClick={() => add({ name: "", phone: "" })}>+ Add Mechanic</Button>
+                        <Button type="dashed" onClick={() => add({ name: "", phone: "" })} style={{ width: isMobile ? "100%" : undefined }}>+ Add Mechanic</Button>
                       </div>
                       {fields.map(({ key, name, ...restField }) => (
-                        <div key={key} style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8, marginBottom: 8 }}>
+                        <div key={key} style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr auto", gap: 8, marginBottom: 8 }}>
                           <Form.Item
                             {...restField}
                             name={[name, "name"]}
+                            normalize={forceUpper}
                             rules={[{ required: true, message: "Enter mechanic name" }]}
                             style={{ marginBottom: 0 }}
                           >
-                            <Input placeholder="Mechanic name" />
+                            <Input placeholder="MECHANIC NAME" style={{ textTransform: "uppercase" }} />
                           </Form.Item>
                           <Form.Item
                             {...restField}
@@ -624,7 +739,7 @@ export default function OwnerProfile() {
                           >
                             <Input placeholder="Phone (optional)" maxLength={10} />
                           </Form.Item>
-                          <Button danger onClick={() => remove(name)}>Delete</Button>
+                          <Button danger onClick={() => remove(name)} style={{ width: isMobile ? "100%" : undefined }}>Delete</Button>
                         </div>
                       ))}
                     </div>
@@ -633,7 +748,7 @@ export default function OwnerProfile() {
 
                 <Divider style={{ margin: "14px 0 10px" }} />
                 <Title level={5} style={{ marginBottom: 8 }}>Branding & Integration</Title>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 90px", gap: 12 }}>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 90px", gap: 12 }}>
                   <Form.Item label="Logo URL" name="logoUrl" rules={[{ type: "url", message: "Enter a valid URL" }]} style={{ marginBottom: 0 }}>
                     <Input placeholder="https://..." />
                   </Form.Item>
@@ -650,7 +765,7 @@ export default function OwnerProfile() {
                   </div>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 90px", gap: 12, marginTop: 10 }}>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 90px", gap: 12, marginTop: 10 }}>
                   <Form.Item label="Location QR URL" name="locationQrUrl" rules={[{ type: "url", message: "Enter a valid URL" }]} style={{ marginBottom: 0 }}>
                     <Input placeholder="https://... (QR image for Scan for Location)" />
                   </Form.Item>
@@ -688,7 +803,7 @@ export default function OwnerProfile() {
 
                 <Divider style={{ margin: "14px 0 10px" }} />
                 <Title level={5} style={{ marginBottom: 8 }}>Quotation Finance Defaults</Title>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
                   <Form.Item
                     label="Quotation Processing Fee"
                     name="processingFee"
@@ -707,7 +822,7 @@ export default function OwnerProfile() {
                   </Form.Item>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12, marginTop: 12 }}>
                   <Form.Item label="Branch Limit (set by admin)" style={{ marginBottom: 0 }}>
                     <Input value={branchLimit} readOnly />
                   </Form.Item>
@@ -738,7 +853,7 @@ export default function OwnerProfile() {
                 </Form.Item>
                 <Form.Item label="Default Selected Fittings" name="freeFittingsDefaultSelected" style={{ marginBottom: 8 }}>
                   <Checkbox.Group style={{ width: "100%" }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(140px, 1fr))", gap: 6 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(140px, 1fr))", gap: 6 }}>
                       {parsedFreeFittingsOptions.map((item) => (
                         <Checkbox key={item} value={item}>{item}</Checkbox>
                       ))}
@@ -746,8 +861,23 @@ export default function OwnerProfile() {
                   </Checkbox.Group>
                 </Form.Item>
 
+                <Divider style={{ margin: "16px 0 12px" }} />
+                <Title level={5} style={{ marginBottom: 8 }}>Job Card Labour Defaults</Title>
+                <Text type="secondary" style={{ display: "block", marginBottom: 10 }}>
+                  One line per item in `DESCRIPTION | RATE` format. Example: `AIR FILTER | 180`.
+                </Text>
+                <Form.Item label="Scooter Base Labour" name="labourScooterBase" style={{ marginBottom: 8 }}>
+                  <Input.TextArea rows={5} placeholder={"ENGINE OIL | 450\nCONSUMABLES | 70\nGEARBOX OIL | 80"} />
+                </Form.Item>
+                <Form.Item label="Motorcycle Base Labour" name="labourMotorcycleBase" style={{ marginBottom: 8 }}>
+                  <Input.TextArea rows={5} placeholder={"ENGINE OIL | 450\nCONSUMABLES | 80\nCHAIN LUBRICATION | 70"} />
+                </Form.Item>
+                <Form.Item label="Paid Service Add-ons" name="labourPaidAddons" style={{ marginBottom: 8 }}>
+                  <Input.TextArea rows={4} placeholder={"SERVICE LABOUR | 400\nWATER WASH | 150"} />
+                </Form.Item>
+
                 <div style={{ marginTop: 16 }}>
-                  <Button type="primary" onClick={onSave} loading={saving}>
+                  <Button type="primary" onClick={onSave} loading={saving} style={{ width: isMobile ? "100%" : undefined }}>
                     Save Changes
                   </Button>
                 </div>
@@ -759,11 +889,11 @@ export default function OwnerProfile() {
               <Text type="secondary">
                 Create invite links for staff, mechanics, or call boys. They will be linked to your organization automatically.
               </Text>
-              <Space style={{ marginTop: 12 }} wrap>
+              <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(3, minmax(180px, max-content))", gap: 8 }}>
                 <Select
                   value={inviteRole}
                   onChange={setInviteRole}
-                  style={{ minWidth: 180 }}
+                  style={{ minWidth: isMobile ? 0 : 180, width: "100%" }}
                   options={[
                     { label: "Staff", value: "staff" },
                     { label: "Mechanic", value: "mechanic" },
@@ -772,7 +902,7 @@ export default function OwnerProfile() {
                 <Select
                   allowClear
                   placeholder="Optional branch"
-                  style={{ minWidth: 220 }}
+                  style={{ minWidth: isMobile ? 0 : 220, width: "100%" }}
                   value={inviteBranchId || undefined}
                   onChange={(v) => setInviteBranchId(String(v || "").trim())}
                   options={branchOptions}
@@ -785,7 +915,7 @@ export default function OwnerProfile() {
                     if (!res?.success) {
                       message.error(res?.message || "Failed to create invite");
                     } else {
-                      let nextInviteUrl = String(res?.data?.inviteUrl || "").trim();
+                      let nextInviteUrl = normalizeInviteUrlForCurrentOrigin(res?.data?.inviteUrl);
                       const branchInResponse = String(res?.data?.branchId || selectedBranchId || "").trim();
                       if (nextInviteUrl && branchInResponse) {
                         try {
@@ -805,13 +935,14 @@ export default function OwnerProfile() {
                   }}
                   loading={inviteLoading}
                   type="dashed"
+                  style={{ width: isMobile ? "100%" : undefined }}
                 >
                   Create Invite Link
                 </Button>
-              </Space>
+              </div>
               <div style={{ marginTop: 12 }}>
                 <Input value={inviteUrl} readOnly placeholder="Invite link will appear here" />
-                <Space style={{ marginTop: 8 }} wrap>
+                <Space style={{ marginTop: 8, width: "100%" }} wrap>
                   <Button onClick={copyInviteLink} loading={copyingInvite} disabled={!inviteUrl}>
                     Copy Link
                   </Button>
@@ -822,6 +953,7 @@ export default function OwnerProfile() {
               </div>
             </div>
 
+            {!isMobile && (
             <div className="owner-preview-sticky" style={{ position: "sticky", top: 12 }}>
               <Card
                 size="small"
@@ -834,79 +966,112 @@ export default function OwnerProfile() {
                 }}
                 bodyStyle={{ padding: 12 }}
               >
-                <div style={{ borderBottom: "2px solid #111", marginBottom: 10, paddingBottom: 8 }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 10 }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 11, color: "#64748b", marginBottom: 2 }}>
-                        Owner: {ownerNamePreviewUpper}
+                <div style={{ border: "1px solid #cbd5e1", borderRadius: 8, overflow: "auto", background: "#fff", marginBottom: 10 }}>
+                  <div style={{ width: previewPaperWidth, zoom: previewPaperZoom, transformOrigin: "top left", padding: 10, fontFamily: "Arial, sans-serif", color: "#111" }}>
+                    <div style={{ display: "flex", alignItems: "center", borderBottom: "2px solid #000", paddingBottom: 6, marginBottom: 8 }}>
+                      <div style={{ textAlign: "center", marginRight: 12, width: 70 }}>
+                        {locationQrPreview && !locationQrPreviewFailed ? (
+                          <img
+                            key={`main-qr-${locationQrPreview}`}
+                            src={locationQrPreview}
+                            alt="QR preview"
+                            style={{ width: 64, height: 64, objectFit: "contain" }}
+                            onError={(e) => handleImagePreviewError(e, setLocationQrPreviewFailed)}
+                          />
+                        ) : (
+                          <div style={{ width: 64, height: 64, border: "1px solid #d1d5db", borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            QR
+                          </div>
+                        )}
+                        <div style={{ fontSize: 9, fontWeight: 600, marginTop: 1 }}>Scan for Location</div>
                       </div>
-                      {orgNameRegionalPreview ? (
-                        <div
-                          style={{
-                            fontSize: `${Number(orgNameRegionalFontSizePtPreview || 23)}pt`,
-                            fontWeight: Number(orgNameRegionalFontWeightPreview || 800),
-                            fontFamily: String(orgNameRegionalFontFamilyPreview || "").trim() || undefined,
-                            lineHeight: 1.1,
-                            marginBottom: 3,
-                          }}
-                        >
-                          {orgNameRegionalPreview}
-                        </div>
-                      ) : null}
-                      <div
-                        style={{
-                          fontSize: `${Number(orgNameFontSizePtPreview || 22)}pt`,
-                          fontWeight: Number(orgNameFontWeightPreview || 800),
-                          fontFamily: String(orgNameFontFamilyPreview || "").trim() || undefined,
-                          color: String(orgNameFontColorPreview || "#000000").trim() || "#000000",
-                          lineHeight: 1.1,
-                          marginBottom: 4,
-                        }}
-                      >
-                        {orgNamePreviewUpper}
+                      <div style={{ flex: 1, display: "flex", justifyContent: "center" }}>
+                        <div style={{ fontSize: 17, border: "2px solid #000", padding: "4px 10px", fontWeight: 800, display: "inline-block" }}>QUOTATION</div>
                       </div>
-                      {orgAddrPreview ? (
-                        <div
-                          style={{
-                            fontSize: `${Number(orgAddressFontSizePtPreview || 12)}pt`,
-                            fontWeight: Number(orgAddressFontWeightPreview || 600),
-                            lineHeight: 1.25,
-                            whiteSpace: "pre-wrap",
-                          }}
-                        >
-                          {orgAddrPreview}
-                        </div>
-                      ) : null}
-                      {mobilePreviewLine ? <div style={{ marginTop: 4, fontSize: "10pt", fontWeight: 700 }}>Mob: {mobilePreviewLine}</div> : null}
+                      <div style={{ textAlign: "right", fontWeight: 600 }}>
+                        <div>Sl. No.: {previewSerialNo}</div>
+                        <div>Date: {previewDateText}</div>
+                      </div>
                     </div>
-                    <div style={{ border: "1px solid #111", borderRadius: 6, overflow: "hidden", minHeight: 120, display: "flex", alignItems: "center", justifyContent: "center", background: "#fff" }}>
-                      {logoPreview && !logoPreviewFailed ? (
-                        <img
-                          key={`main-${logoPreview}`}
-                          src={logoPreview}
-                          alt="Logo preview"
-                          style={{ width: "100%", height: "100%", objectFit: "contain" }}
-                          onError={(e) => handleImagePreviewError(e, setLogoPreviewFailed)}
-                        />
-                      ) : <Text type="secondary">Logo</Text>}
+
+                    <div style={{ borderBottom: "2px solid #000", paddingBottom: 6, marginBottom: 8 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 165px", columnGap: 16, alignItems: "stretch" }}>
+                        <div style={{ minWidth: 0 }}>
+                          {orgNameRegionalPreview ? (
+                            <div
+                              style={{
+                                fontSize: `${Number(orgNameRegionalFontSizePtPreview || 23)}pt`,
+                                fontWeight: Number(orgNameRegionalFontWeightPreview || 800),
+                                fontFamily: String(orgNameRegionalFontFamilyPreview || "").trim() || undefined,
+                                lineHeight: 1.1,
+                                marginBottom: 4,
+                              }}
+                            >
+                              {orgNameRegionalPreview}
+                            </div>
+                          ) : null}
+                          <div
+                            style={{
+                              fontSize: `${Number(orgNameFontSizePtPreview || 22)}pt`,
+                              fontWeight: Number(orgNameFontWeightPreview || 800),
+                              fontFamily: String(orgNameFontFamilyPreview || "").trim() || undefined,
+                              color: String(orgNameFontColorPreview || "#000000").trim() || "#000000",
+                              lineHeight: 1.1,
+                              marginBottom: 6,
+                            }}
+                          >
+                            {orgNamePreviewUpper || "ORGANIZATION NAME"}
+                          </div>
+
+                          {orgAddrPreview ? (
+                            <div
+                              style={{
+                                fontSize: `${Number(orgAddressFontSizePtPreview || 12)}pt`,
+                                fontWeight: Number(orgAddressFontWeightPreview || 600),
+                                lineHeight: 1.28,
+                                whiteSpace: "pre-wrap",
+                              }}
+                            >
+                              {orgAddrPreview}
+                            </div>
+                          ) : null}
+                          {mobilePreviewLine ? (
+                            <div style={{ marginTop: 6, fontSize: "12pt", fontWeight: 700 }}>
+                              Mob No: {mobilePreviewLine}
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            width: 165,
+                            minHeight: 165,
+                            border: "1px solid #000",
+                            borderRadius: 6,
+                            overflow: "hidden",
+                          }}
+                        >
+                          {logoPreview && !logoPreviewFailed ? (
+                            <img
+                              key={`main-${logoPreview}`}
+                              src={logoPreview}
+                              alt="Logo preview"
+                              style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                              onError={(e) => handleImagePreviewError(e, setLogoPreviewFailed)}
+                            />
+                          ) : (
+                            <Text type="secondary">Logo</Text>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                  <div style={{ fontSize: 12, color: "#4b5563" }}>Live updates while typing</div>
-                  <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, width: 58, height: 58, display: "flex", alignItems: "center", justifyContent: "center", background: "#fff" }}>
-                    {locationQrPreview && !locationQrPreviewFailed ? (
-                      <img
-                        key={`main-qr-${locationQrPreview}`}
-                        src={locationQrPreview}
-                        alt="QR preview"
-                        style={{ width: 52, height: 52, objectFit: "contain" }}
-                        onError={(e) => handleImagePreviewError(e, setLocationQrPreviewFailed)}
-                      />
-                    ) : <Text type="secondary" style={{ fontSize: 11 }}>QR</Text>}
-                  </div>
-                </div>
+                <div style={{ fontSize: 12, color: "#4b5563" }}>Live updates while typing</div>
 
                 <Divider style={{ margin: "12px 0 10px" }} />
                 <div style={{ fontSize: 12, color: "#4b5563", marginBottom: 6 }}>WhatsApp Message Preview</div>
@@ -927,6 +1092,7 @@ export default function OwnerProfile() {
                 </div>
               </Card>
             </div>
+            )}
           </div>
         </Form>
       </Card>

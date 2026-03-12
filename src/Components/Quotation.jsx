@@ -12,6 +12,7 @@ import {
   EyeOutlined,
 } from "@ant-design/icons";
 import FetchQuot from "./FetchQuot"; // for fetching saved quotations
+import DashboardQuickNav from "./DashboardQuickNav";
 import { GetCurrentUser } from "../apiCalls/users";
 import { getBranch, listBranchesPublic } from "../apiCalls/branches";
 import { listUsersPublic } from "../apiCalls/adminUsers";
@@ -1684,7 +1685,7 @@ export default function Quotation() {
     <>
       {msgCtx}{/* 👈 enables the pop-up to actually render */}
       <style>{`
-        .wrap { max-width: 1000px; margin: 12px auto; padding: 0 12px; }
+        .wrap { width: 100%; max-width: none; margin: 12px 0; padding: 0 12px; box-sizing: border-box; }
         .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
         .pending-trigger {
           border-radius: 10px;
@@ -1817,6 +1818,7 @@ export default function Quotation() {
 
       {/* On-screen inputs */}
       <div className="wrap no-print">
+        <DashboardQuickNav currentLabel="Quotation Form" />
         <div className="card">
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {/* NEW: Fetch saved quotation by Quotation No. or Mobile */}

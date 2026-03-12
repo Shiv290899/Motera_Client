@@ -36,6 +36,9 @@ export const saveBookingForm = async (payload) => {
 
 export const saveBookingViaWebhook = async ({ webhookUrl, payload, headers, method }) => {
   const url = resolveWebhookUrl(webhookUrl);
+  if (!url) {
+    return { success: false, ok: false, noWebhook: true, message: "Owner web app URL not configured." };
+  }
   const { data } = await axiosInstance.post("/forms/booking/webhook", { webhookUrl: url, payload, headers, method }, { timeout: 60000 });
   return data;
 };
@@ -43,6 +46,9 @@ export const saveBookingViaWebhook = async ({ webhookUrl, payload, headers, meth
 // Jobcard-specific webhook proxy (separate from booking for clarity)
 export const saveJobcardViaWebhook = async ({ webhookUrl, payload, headers, method }) => {
   const url = resolveWebhookUrl(webhookUrl);
+  if (!url) {
+    return { success: false, ok: false, noWebhook: true, message: "Owner web app URL not configured." };
+  }
   const { data } = await axiosInstance.post(
     "/forms/jobcard/webhook",
     { webhookUrl: url, payload, headers, method },

@@ -11,8 +11,7 @@ const { Text } = Typography;
 export default function AdminDailyCollections() {
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
-  const DEFAULT_JC_URL = 'https://script.google.com/macros/s/AKfycbz_DoNoD0XTx3RNMOSZfypbMqWVN4yTy3ct96aE4LhJ9yb_YvKr0GRbO_GA3Fgkwptb/exec?module=jobcard';
-  const GAS_URL = resolveUnifiedGasUrl('jobcard', import.meta.env.VITE_JOBCARD_GAS_URL || DEFAULT_JC_URL);
+  const GAS_URL = resolveUnifiedGasUrl('jobcard');
   const SECRET = import.meta.env.VITE_JOBCARD_GAS_SECRET || '';
   const readUser = () => { try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; } };
   const me = useMemo(() => readUser(), []);
@@ -48,6 +47,11 @@ export default function AdminDailyCollections() {
 
   // Seed from cache for instant UI
   useEffect(() => {
+    if (!GAS_URL) {
+      setLedgerRows([]);
+      setHasCache(false);
+      return;
+    }
     try {
       const raw = localStorage.getItem(CACHE_KEY(ledgerStatus));
       if (!raw) { setHasCache(false); return; }
@@ -60,7 +64,12 @@ export default function AdminDailyCollections() {
   }, [ledgerStatus]);
 
   const fetchLedger = async () => {
-    if (!GAS_URL) { message.error('Job Card GAS URL not configured'); return; }
+    if (!GAS_URL) {
+      setLedgerRows([]);
+      setHasCache(false);
+      setLedgerLoading(false);
+      return;
+    }
     setLedgerLoading(true);
     try {
       // Always fetch full list by status; filter staff/branch client-side for multi-select support

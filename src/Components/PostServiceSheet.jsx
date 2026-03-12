@@ -45,8 +45,37 @@ const PostServiceSheet = forwardRef(function PostServiceSheet({ active, vals, to
     const digits = String(v ?? "").replace(/\D/g, "");
     return digits ? parseInt(digits, 10) : null;
   };
-  const kmVal = parseKm(vals?.km);
-  const nextServiceKm = kmVal != null ? kmVal + 2000 : null;
+  const pickFirst = (...arr) => arr.find((v) => String(v ?? "").trim() !== "");
+  const kmSource = pickFirst(
+    vals?.km,
+    vals?.KM,
+    vals?.odometer,
+    vals?.odometerReading,
+    vals?.["Odometer Reading"],
+    vals?.["Odomete Reading"],
+    vals?.values?.km,
+    vals?.values?.KM,
+    vals?.values?.["Odometer Reading"],
+    vals?.formValues?.km,
+    vals?.formValues?.KM,
+    vals?.formValues?.["Odometer Reading"]
+  );
+  const kmVal = parseKm(kmSource);
+  const nextServiceSource = pickFirst(
+    vals?.nextServiceKm,
+    vals?.nextService,
+    vals?.nextServiceDue,
+    vals?.["Next Service"],
+    vals?.["Next Service Due"],
+    vals?.values?.nextServiceKm,
+    vals?.values?.nextService,
+    vals?.values?.["Next Service"],
+    vals?.formValues?.nextServiceKm,
+    vals?.formValues?.nextService,
+    vals?.formValues?.["Next Service"]
+  );
+  const parsedNextServiceKm = parseKm(nextServiceSource);
+  const nextServiceKm = parsedNextServiceKm != null ? parsedNextServiceKm : (kmVal != null ? kmVal + 2000 : null);
   const branch = String(vals?.branch || "").trim();
   const isNH = false;
   const mobileDigits = useMemo(() => {

@@ -22,6 +22,7 @@ const { Text } = Typography;
 const HEAD = {
   ts: ["Submitted At", "Timestamp", "Time", "Date"],
   branch: ["Branch"],
+  executive: ["Executive", "Executive Name", "Executive_Name", "executive_name", "executiveName", "Sales Executive", "Staff", "Assigned To"],
   name: ["Customer Name", "Customer_Name", "Customer", "Name"],
   mobile: ["Mobile Number", "Mobile", "Phone"],
   bookingId: ["Booking ID", "Booking_ID", "Booking Id", "BookingID"],
@@ -113,6 +114,7 @@ export default function Bookings() {
   const [currentUser, setCurrentUser] = useState(null);
   const [userRole, setUserRole] = useState("");
   const [allowedBranches, setAllowedBranches] = useState([]);
+  const [ownerBranchCount, setOwnerBranchCount] = useState(0);
   useEffect(() => {
     try {
       const raw = localStorage.getItem('user');
@@ -126,7 +128,9 @@ export default function Bookings() {
       if (Array.isArray(u?.branches)) {
         u.branches.forEach((b)=>{ const nm = typeof b === 'string' ? b : (b?.name || ''); if (nm) list.push(nm); });
       }
-      setAllowedBranches(Array.from(new Set(list.filter(Boolean))));
+      const unique = Array.from(new Set(list.filter(Boolean)));
+      setAllowedBranches(unique);
+      setOwnerBranchCount(unique.length);
     } catch { /* ignore */ }
   }, []);
   useEffect(() => {
@@ -240,6 +244,15 @@ export default function Bookings() {
       chassis: pick(obj, HEAD.chassis),
       fileUrl: pick(obj, HEAD.file),
       branch: pick(obj, HEAD.branch),
+      executive:
+        payload?.formValues?.executive ||
+        payload?.formValues?.executiveName ||
+        payload?.executive ||
+        payload?.executiveName ||
+        payload?.salesExecutive ||
+        payload?.staffName ||
+        payload?.staff ||
+        pick(obj, HEAD.executive),
       status: (pick(obj, HEAD.status) || 'pending').toLowerCase(),
       availability: pick(obj, HEAD.availability),
       vehicleNo,
@@ -385,7 +398,7 @@ export default function Bookings() {
         }
       } catch {
         message.error('Could not load bookings via Apps Script. Check Web App URL / access.');
-        if (!cancelled) { setRows([]); setTotalCount(0); }
+        // Keep previous rows on transient fetch errors to avoid blank table flicker.
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -394,8 +407,11 @@ export default function Bookings() {
     // allow refresh button to re-trigger load without page reload
     const handler = () => load();
     window.addEventListener('reload-bookings', handler);
-    return () => { cancelled = true; };
-  }, [debouncedQ, branchFilter, statusFilter, page, pageSize, dateRange, GAS_URL_STATIC, USE_SERVER_PAG]);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('reload-bookings', handler);
+    };
+  }, [debouncedQ, branchFilter, statusFilter, page, pageSize, dateRange, GAS_URL_STATIC, USE_SERVER_PAG, mapRow, cacheKey]);
 
   const optionRows = filterSourceRows.length ? filterSourceRows : rows;
 
@@ -1174,7 +1190,7 @@ export default function Bookings() {
     }
   });
 
-  const showRemarks = ["backend","admin","owner"].includes(userRole);
+  const showRemarks = ["backend","admin","owner"].includes(userRole) && ownerBranchCount > 2;
 
   columns.push({
       title: showRemarks ? 'Actions + Remarks' : 'Actions',

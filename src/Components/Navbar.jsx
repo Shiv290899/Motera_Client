@@ -185,7 +185,7 @@ export default function Navbar() {
 
   // --- Design tokens (one place to tweak look) ---
   const T = {
-    maxW: 1200,
+    maxW: "100%",
     radius: 12,
     brand: "#e11d48",          // primary accent (rose-600)
     ink: "#131417",            // strong text
@@ -210,6 +210,7 @@ export default function Navbar() {
     },
     container: {
       maxWidth: T.maxW,
+      width: "100%",
       margin: "0 auto",
       padding: `0 ${isMobile ? 12 : 20}px`,
     },
@@ -217,7 +218,7 @@ export default function Navbar() {
     headerWrap: {
       position: isDesktop ? "sticky" : "static",
       top: isDesktop ? 0 : "auto",
-      zIndex: 60,
+      zIndex: 1000,
       backdropFilter: "saturate(140%) blur(10px)",
       WebkitBackdropFilter: "saturate(140%) blur(10px)",
       background: T.glass,
@@ -313,8 +314,9 @@ export default function Navbar() {
       border: `1px solid ${T.line}`,
       borderRadius: 12,
       boxShadow: "0 12px 30px rgba(0,0,0,0.12)",
-      overflow: "hidden",
-      zIndex: 70,
+      overflow: "auto",
+      maxHeight: "70vh",
+      zIndex: 1200,
     },
     accItem: {
       padding: "10px 12px",
@@ -343,7 +345,7 @@ export default function Navbar() {
       position: "fixed",
       inset: 0,
       background: "rgba(0,0,0,0.25)",
-      zIndex: 55,
+      zIndex: 1150,
       opacity: menuOpen ? 1 : 0,
       pointerEvents: menuOpen ? "auto" : "none",
       transition: "opacity .2s ease",
@@ -358,7 +360,7 @@ export default function Navbar() {
       background: "#fff",
       borderLeft: `1px solid ${T.line}`,
       boxShadow: "-10px 0 30px rgba(0,0,0,0.12)",
-      zIndex: 60,
+      zIndex: 1160,
       transform: menuOpen ? "translateX(0)" : "translateX(100%)",
       transition: "transform .24s ease",
       display: isMobile ? "flex" : "none",
@@ -734,15 +736,6 @@ export default function Navbar() {
                   style={{ ...styles.drawerLink(false), width: "100%", textAlign: "left", background: "white", border: `1px solid ${T.line}`, cursor: "pointer" }}
                 >
                   Edit Profile
-                </button>
-              )}
-              {String(user?.role || "").toLowerCase() === "owner" && (
-                <button
-                  type="button"
-                  onClick={() => { navigate("/staff"); setMenuOpen(false); }}
-                  style={{ ...styles.drawerLink(false), width: "100%", textAlign: "left", background: "white", border: `1px solid ${T.line}`, cursor: "pointer" }}
-                >
-                  Staff Dashboard
                 </button>
               )}
               <button

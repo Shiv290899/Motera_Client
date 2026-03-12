@@ -28,11 +28,12 @@ import { FaWhatsapp } from "react-icons/fa";
 import PreServiceSheet from "./PreServiceSheet";
 import PostServiceSheet from "./PostServiceSheet";
 import FetchJobcard from "./FetchJobcard";
+import DashboardQuickNav from "./DashboardQuickNav";
 import { saveBookingViaWebhook, saveJobcardViaWebhook, reserveJobcardSerial } from "../apiCalls/forms";
 import { GetCurrentUser } from "../apiCalls/users";
 import { getBranch, listBranchesPublic } from "../apiCalls/branches";
 import { listUsersPublic } from "../apiCalls/adminUsers";
-import { getOwnerMechanics, getOwnerOrgName, getOwnerOrgNameRegional, resolveLocationQrImageUrl, resolveUnifiedGasUrl } from "../utils/ownerConfig";
+import { getOwnerLabourConfig, getOwnerMechanics, getOwnerOrgName, getOwnerOrgNameRegional, resolveLocationQrImageUrl, resolveUnifiedGasUrl } from "../utils/ownerConfig";
 import { normalizeKey, uniqCaseInsensitive } from "../utils/caseInsensitive";
 
 const { Title, Text } = Typography;
@@ -151,7 +152,7 @@ const FUEL_LEVELS = ["Empty", "¼", "½", "¾", "Full"];
 
 // Labour defaults + price book
 const DEFAULT_GST_LABOUR = 0;
-const PRICE_BOOK = {
+const DEFAULT_PRICE_BOOK = {
   Scooter: {
     base: [
       { desc: "Engine oil", rate: 450 },
@@ -217,7 +218,7 @@ const isOtherLabourOption = (desc) => {
   return n === "other" || n === "others";
 };
 
-const collectLabourCatalog = (serviceType, vehicleType) => {
+const collectLabourCatalog = (serviceType, vehicleType, priceBook = DEFAULT_PRICE_BOOK) => {
   const merged = [];
   const push = (item) => {
     if (!item) return;
@@ -228,10 +229,10 @@ const collectLabourCatalog = (serviceType, vehicleType) => {
   };
 
   // Keep current context items first so their rate wins for duplicates.
-  buildRows(serviceType, vehicleType).forEach(push);
-  (PRICE_BOOK.Scooter?.base || []).forEach(push);
-  (PRICE_BOOK.Motorcycle?.base || []).forEach(push);
-  (PRICE_BOOK.paidAddons || []).forEach(push);
+  buildRows(serviceType, vehicleType, priceBook).forEach(push);
+  (priceBook.Scooter?.base || []).forEach(push);
+  (priceBook.Motorcycle?.base || []).forEach(push);
+  (priceBook.paidAddons || []).forEach(push);
 
   const seen = new Set();
   return merged.filter((item) => {
@@ -243,17 +244,17 @@ const collectLabourCatalog = (serviceType, vehicleType) => {
 };
 
 // Build labour rows from selections
-function buildRows(serviceType, vehicleType) {
+function buildRows(serviceType, vehicleType, priceBook = DEFAULT_PRICE_BOOK) {
   if (!serviceType || !vehicleType) return [];
   const svc = String(serviceType || "").toLowerCase();
   const isPaid = svc === "paid";
   const isFree = svc === "free";
   if (!isPaid && !isFree) return []; // No presets for Minor/Accidental
 
-  const base = PRICE_BOOK[vehicleType]?.base ?? [];
+  const base = priceBook[vehicleType]?.base ?? [];
   const rows = base.map((b) => ({ desc: toUpperSafe(b.desc), qty: 1, rate: b.rate }));
   if (isPaid) {
-    rows.push(...PRICE_BOOK.paidAddons.map((a) => ({ desc: toUpperSafe(a.desc), qty: 1, rate: a.rate })));
+    rows.push(...(priceBook.paidAddons || []).map((a) => ({ desc: toUpperSafe(a.desc), qty: 1, rate: a.rate })));
   }
   return rows;
 }
@@ -652,6 +653,19 @@ export default function JobCard({ initialValues = null } = {}) {
   const autoFetchTimerRef = useRef(null);
   const regInputSourceRef = useRef("init");
   const [bikeData, setBikeData] = useState([]);
+  const ownerLabourConfig = useMemo(() => getOwnerLabourConfig(), []);
+  const ownerPriceBook = useMemo(
+    () => ({
+      Scooter: { base: ownerLabourConfig.scooterBase },
+      Motorcycle: { base: ownerLabourConfig.motorcycleBase },
+      paidAddons: ownerLabourConfig.paidAddons,
+    }),
+    [ownerLabourConfig]
+  );
+  const buildRowsByOwnerConfig = useCallback(
+    (serviceType, vehicleType) => buildRows(serviceType, vehicleType, ownerPriceBook),
+    [ownerPriceBook]
+  );
   const setRegDisplayProgrammatic = (val) => {
     regInputSourceRef.current = "program";
     setRegDisplay(val);
@@ -896,7 +910,7 @@ export default function JobCard({ initialValues = null } = {}) {
         labourRows: normalizeRowDesc(
           Array.isArray(initialValues?.labourRows) && initialValues.labourRows.length
             ? initialValues.labourRows
-            : buildRows(fv.serviceType, fv.vehicleType)
+            : buildRowsByOwnerConfig(fv.serviceType, fv.vehicleType)
         ),
       };
       form.setFieldsValue(fields);
@@ -1210,8 +1224,8 @@ export default function JobCard({ initialValues = null } = {}) {
     [models]
   );
   const labourCatalog = useMemo(
-    () => collectLabourCatalog(serviceTypeLocal, vehicleTypeLocal),
-    [serviceTypeLocal, vehicleTypeLocal]
+    () => collectLabourCatalog(serviceTypeLocal, vehicleTypeLocal, ownerPriceBook),
+    [ownerPriceBook, serviceTypeLocal, vehicleTypeLocal]
   );
   const labourDescOptions = useMemo(
     () =>
@@ -1527,7 +1541,7 @@ export default function JobCard({ initialValues = null } = {}) {
       setVehicleTypeLocal(defaultVehicle);
       form.setFieldsValue({
         vehicleType: defaultVehicle,
-        labourRows: buildRows(next, defaultVehicle),
+        labourRows: buildRowsByOwnerConfig(next, defaultVehicle),
         gstLabour: DEFAULT_GST_LABOUR,
         discounts: { labour: 0 },
         floorMat: "No",
@@ -2120,7 +2134,7 @@ export default function JobCard({ initialValues = null } = {}) {
   return (
     <>
       <style>{`
-        .wrap { max-width: 1000px; margin: 12px auto; padding: 0 12px; }
+        .wrap { width: 100%; max-width: none; margin: 12px 0; padding: 0 12px; box-sizing: border-box; }
         .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
         /* Make header actions stack on small screens */
         @media screen and (max-width: 600px) {
@@ -2132,6 +2146,7 @@ export default function JobCard({ initialValues = null } = {}) {
       `}</style>
 
       <div className="wrap no-print">
+        <DashboardQuickNav currentLabel="Job Card Form" />
         <div className="card">
           <div
             className="brand-actions-row"
@@ -2148,7 +2163,7 @@ export default function JobCard({ initialValues = null } = {}) {
               <FetchJobcard
                 form={form}
                 formatReg={formatReg}
-                buildRows={buildRows}
+                buildRows={buildRowsByOwnerConfig}
                 defaultGstLabour={DEFAULT_GST_LABOUR}
                 lists={{
                   BRANCHES: (allowedBranches || []).map((b) => b.name).filter(Boolean),
@@ -2501,7 +2516,7 @@ export default function JobCard({ initialValues = null } = {}) {
                         form.setFieldsValue({ vehicleType: val });
                         if (serviceTypeLocal) {
                           form.setFieldsValue({
-                            labourRows: buildRows(serviceTypeLocal, val),
+                            labourRows: buildRowsByOwnerConfig(serviceTypeLocal, val),
                             gstLabour: DEFAULT_GST_LABOUR,
                             discounts: { labour: 0 },
                           });

@@ -26,7 +26,7 @@ const HEAD = {
   mobile: ["Mobile", "Phone", "Mobile Number"],
   branch: ["Branch"],
   company: ["Company", "Company Name"],
-  executive: ["Executive"],
+  executive: ["Executive", "Executive Name", "Executive_Name", "executive_name", "executiveName", "Sales Executive", "Service Executive", "Staff", "Assigned To"],
   jcNo: ["JC No.", "JC No", "Job Card No", "JobCard No", "JCNumber"],
   regNo: ["Vehicle No", "Vehicle_No", "Registration Number", "RegNo", "Reg No"],
   model: ["Model", "Bike Model"],
@@ -79,6 +79,7 @@ export default function Jobcards() {
   const [quickKey, setQuickKey] = useState(null); // today | yesterday | null
   const [userRole, setUserRole] = useState("");
   const [allowedBranches, setAllowedBranches] = useState([]);
+  const [ownerBranchCount, setOwnerBranchCount] = useState(0);
   // Controlled pagination
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -128,7 +129,9 @@ export default function Jobcards() {
       if (Array.isArray(u?.branches)) {
         u.branches.forEach((b)=>{ const nm = typeof b === 'string' ? b : (b?.name || ''); if (nm) list.push(nm); });
       }
-      setAllowedBranches(Array.from(new Set(list.filter(Boolean))));
+      const unique = Array.from(new Set(list.filter(Boolean)));
+      setAllowedBranches(unique);
+      setOwnerBranchCount(unique.length);
     } catch { /* ignore */ }
   }, []);
 
@@ -195,7 +198,15 @@ export default function Jobcards() {
       name: fv.name || pick(obj, HEAD.name),
       mobile: fv.mobile || pick(obj, HEAD.mobile),
       branch: fv.branch || pick(obj, HEAD.branch),
-      executive: fv.executive || pick(obj, HEAD.executive),
+      executive:
+        fv.executive ||
+        fv.executiveName ||
+        payload?.executive ||
+        payload?.executiveName ||
+        payload?.salesExecutive ||
+        payload?.staffName ||
+        payload?.staff ||
+        pick(obj, HEAD.executive),
       jcNo: fv.jcNo || pick(obj, HEAD.jcNo),
       regNo,
       model,
@@ -413,7 +424,7 @@ export default function Jobcards() {
         }
       } catch  {
         message.error('Could not load job cards via Apps Script. Check JOBCARD Web App URL / access.');
-        if (!cancelled) { setRows([]); setTotalCount(0); }
+        // Keep previous rows on transient fetch errors to avoid blank table flicker.
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -422,7 +433,7 @@ export default function Jobcards() {
     const handler = () => load();
     window.addEventListener('reload-jobcards', handler);
     return () => { cancelled = true; window.removeEventListener('reload-jobcards', handler); };
-  }, [branchFilter, serviceFilter, statusFilter, debouncedQ, dateRange, page, pageSize, USE_SERVER_PAG]);
+  }, [branchFilter, serviceFilter, statusFilter, debouncedQ, dateRange, page, pageSize, USE_SERVER_PAG, GAS_URL, mapJobRow, cacheKey]);
 
   const optionRows = filterSourceRows.length ? filterSourceRows : rows;
 
@@ -642,17 +653,58 @@ export default function Jobcards() {
       }
     },
   ];
-  if (["backend","admin","owner"].includes(userRole)) {
+  columns.push({
+    title: "Actions",
+    key: "process",
+    width: 260,
+    render: (_, r) => {
+      const status = String(r.status || '').toLowerCase();
+      const isPending = status === 'pending';
+      const isInvoiceLoading = invoiceLoadingId === (r.jcNo || r.key || r.mobile || '');
+      return (
+        <div style={stackStyle}>
+          <div style={lineStyle}>
+            <Space size={6} wrap>
+              <Tooltip title="Print service invoice">
+                <Button
+                  size="small"
+                  type="primary"
+                  ghost
+                  loading={isInvoiceLoading}
+                  onClick={() => handleServiceInvoice(r)}
+                >
+                  Service Invoice
+                </Button>
+              </Tooltip>
+              {isPending ? (
+                <Tooltip title="Post service">
+                  <Button
+                    size="small"
+                    type="primary"
+                    onClick={() => openPostService(r)}
+                  >
+                    Post Service
+                  </Button>
+                </Tooltip>
+              ) : null}
+            </Space>
+          </div>
+          <div style={lineStyle}>
+            <Tag color={isPending ? 'red' : 'green'} style={{ margin: 0 }}>
+              {isPending ? 'PENDING' : 'COMPLETED'}
+            </Tag>
+          </div>
+        </div>
+      );
+    }
+  });
+  if (["backend","admin","owner"].includes(userRole) && ownerBranchCount > 2) {
     columns.push({ title: "Remarks / Remark Text", key: "remarks", width: 250, render: (_, r) => {
         const rem = remarksMap[r.jcNo];
         const remarkText = String(rem?.text || '');
         const level = String(rem?.level || '').toLowerCase();
         const color = level === 'alert' ? 'red' : level === 'warning' ? 'gold' : level === 'ok' ? 'green' : 'default';
         const title = remarkText ? remarkText : 'No remark yet';
-        const status = String(r.status || '').toLowerCase();
-        const isCompleted = status === 'completed';
-        const isPending = status === 'pending';
-        const isInvoiceLoading = invoiceLoadingId === (r.jcNo || r.key || r.mobile || '');
         return (
           <div style={stackStyle}>
             <div style={lineStyle}>
@@ -661,29 +713,6 @@ export default function Jobcards() {
                   <Tag color={color}>{level ? level.toUpperCase() : '—'}</Tag>
                 </Tooltip>
                 <Button size="small" onClick={()=> setRemarkModal({ open: true, refId: r.jcNo, level: rem?.level || 'ok', text: rem?.text || '' })}>Remark</Button>
-                {isCompleted ? (
-                  <Tooltip title="Print service invoice">
-                    <Button
-                      size="small"
-                      type="primary"
-                      ghost
-                      loading={isInvoiceLoading}
-                      onClick={() => handleServiceInvoice(r)}
-                    >
-                      Service Invoice
-                    </Button>
-                  </Tooltip>
-                ) : (
-                  <Tooltip title={isPending ? "Post service" : "Service not completed"}>
-                    <Button
-                      size="small"
-                      type="primary"
-                      onClick={() => openPostService(r)}
-                    >
-                      Post Service
-                    </Button>
-                  </Tooltip>
-                )}
               </Space>
             </div>
             <Tooltip title={remarkText ? <span style={{ whiteSpace: 'pre-wrap' }}>{remarkText}</span> : null}>

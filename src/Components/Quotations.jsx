@@ -17,7 +17,7 @@ const HEAD = {
   name: ["Customer_Name", "Customer", "Name"],
   mobile: ["Mobile", "Phone", "Mobile Number"],
   branch: ["Branch"],
-  executive: ["Executive"],
+  executive: ["Executive", "Executive Name", "Executive_Name", "executive_name", "executiveName", "Sales Executive", "Staff", "Assigned To"],
   serialNo: ["Quotation No.", "Quotation No", "Serial", "Serial No", "Quote Id"],
   company: ["Company"],
   model: ["Model", "Bike Model"],
@@ -245,6 +245,7 @@ export default function Quotations() {
   const [quickKey, setQuickKey] = useState(null); // today | yesterday | null
   const [userRole, setUserRole] = useState("");
   const [allowedBranches, setAllowedBranches] = useState([]);
+  const [ownerBranchCount, setOwnerBranchCount] = useState(0);
   // Controlled pagination
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -271,7 +272,9 @@ export default function Quotations() {
       if (Array.isArray(u?.branches)) {
         u.branches.forEach((b)=>{ const nm = typeof b === 'string' ? b : (b?.name || ''); if (nm) list.push(nm); });
       }
-      setAllowedBranches(Array.from(new Set(list.filter(Boolean))));
+      const unique = Array.from(new Set(list.filter(Boolean)));
+      setAllowedBranches(unique);
+      setOwnerBranchCount(unique.length);
     } catch { /* ignore */ }
   }, []);
 
@@ -334,7 +337,15 @@ export default function Quotations() {
       name: fv.name || pick(obj, HEAD.name),
       mobile: fv.mobile || pick(obj, HEAD.mobile),
       branch: fv.branch || pick(obj, HEAD.branch),
-      executive: fv.executive || pick(obj, HEAD.executive),
+      executive:
+        fv.executive ||
+        fv.executiveName ||
+        payload?.executive ||
+        payload?.executiveName ||
+        payload?.salesExecutive ||
+        payload?.staffName ||
+        payload?.staff ||
+        pick(obj, HEAD.executive),
       serialNo: fv.serialNo || pick(obj, HEAD.serialNo),
       company,
       model,
@@ -437,7 +448,7 @@ export default function Quotations() {
         }
       } catch  {
         message.error('Could not load quotations via Apps Script. Check QUOTATION Web App URL / access.');
-        if (!cancelled) { setRows([]); setTotalCount(0); }
+        // Keep previous rows on transient fetch errors to avoid blank table flicker.
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -446,7 +457,7 @@ export default function Quotations() {
     const handler = () => load();
     window.addEventListener('reload-quotations', handler);
     return () => { cancelled = true; window.removeEventListener('reload-quotations', handler); };
-  }, [debouncedQ, branchFilter, modeFilter, statusFilter, page, pageSize, dateRange, USE_SERVER_PAG]);
+  }, [debouncedQ, branchFilter, modeFilter, statusFilter, page, pageSize, dateRange, USE_SERVER_PAG, gasConfig, mapRow, cacheKey]);
 
   const optionRows = filterSourceRows.length ? filterSourceRows : rows;
 
@@ -610,35 +621,35 @@ export default function Quotations() {
     window.location.href = `tel:${local}`;
   };
 
-  const stackStyle = { display: 'flex', flexDirection: 'column', gap: 2, lineHeight: 1 };
+  const stackStyle = { display: 'flex', flexDirection: 'column', gap: 4, lineHeight: 1.2 };
   const lineStyle = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
-  const smallLineStyle = { ...lineStyle, fontSize: 8
-   };
-  const tinyLineStyle = { ...lineStyle, fontSize: 10 };
-  const metaLineStyle = { ...lineStyle, fontSize: 9, lineHeight: 1.1 };
+  const smallLineStyle = { ...lineStyle, fontSize: isMobile ? 11.5 : 12.5, color: "#334155", lineHeight: 1.3 };
+  const tinyLineStyle = { ...lineStyle, fontSize: isMobile ? 12.5 : 13.5, fontWeight: 600, color: "#0f172a" };
+  const metaLineStyle = { ...lineStyle, fontSize: isMobile ? 11.5 : 12.5, lineHeight: 1.25, color: "#1f2937" };
   const offeringClamp = {
     display: '-webkit-box',
     WebkitBoxOrient: 'vertical',
     WebkitLineClamp: isMobile ? 3 : 4,
     overflow: 'hidden',
     whiteSpace: 'normal',
-    fontSize: 6,
-    lineHeight: 1,
+    fontSize: isMobile ? 11 : 12,
+    lineHeight: 1.35,
+    color: "#334155",
   };
 
   const columns = [
-    { title: "Time / Branch", key: "timeBranch", width: 120, render: (_, r) => (
+    { title: "Time / Branch", key: "timeBranch", width: 175, render: (_, r) => (
       <div style={stackStyle}>
-        <div style={tinyLineStyle}>{formatTs(r.ts)}</div>
-        <div style={tinyLineStyle}>
+        <div style={{ ...tinyLineStyle, fontWeight: 700 }}>{formatTs(r.ts)}</div>
+        <div style={{ ...smallLineStyle, fontWeight: 600 }}>
           <Text type="secondary" style={{ fontSize: 'inherit' }}>{r.branch || '—'}</Text>
         </div>
       </div>
     ) },
-    { title: "Customer / Mobile", key: "customerMobile", width: 100, render: (_, r) => (
+    { title: "Customer / Mobile", key: "customerMobile", width: 190, render: (_, r) => (
       <div style={stackStyle}>
-        <div style={tinyLineStyle}>{r.name || '—'}</div>
-        <div style={tinyLineStyle}>
+        <div style={{ ...tinyLineStyle, fontWeight: 700 }}>{r.name || '—'}</div>
+        <div style={{ ...smallLineStyle, letterSpacing: 0.2 }}>
           <Text type="secondary" style={{ fontSize: 'inherit' }}>{r.mobile || '—'}</Text>
         </div>
       </div>
@@ -679,7 +690,7 @@ export default function Quotations() {
             <Popover content={popoverContent} trigger={['hover', 'click']} placement="topLeft">
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {details.vehicles.map((v) => (
-                  <div key={v.label} style={{ ...lineStyle, fontSize: 10.5, color: "#1f2937" }}>
+                  <div key={v.label} style={{ ...lineStyle, fontSize: isMobile ? 11.5 : 12.5, color: "#1f2937", lineHeight: 1.35 }}>
                     <span style={{ fontWeight: 800, color: "#1d4ed8" }}>{v.label}:</span> {v.title}
                   </div>
                 ))}
@@ -735,7 +746,7 @@ export default function Quotations() {
       }
     },
   ];
-  if (["backend","admin","owner"].includes(userRole)) {
+  if (["backend","admin","owner"].includes(userRole) && ownerBranchCount > 2) {
     columns.push({ title: "Remarks / Remark Text", key: "remarks", width: 240, render: (_, r) => {
         const rem = remarksMap[r.serialNo];
         const remarkText = String(rem?.text || '');
@@ -803,12 +814,34 @@ export default function Quotations() {
         </Space>
       </div>
 
+      <style>{`
+        .quotation-grid .ant-table-thead > tr > th {
+          background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+          color: #0f172a;
+          font-size: 13px;
+          font-weight: 700;
+          letter-spacing: .2px;
+          border-bottom: 1px solid #dbe3ef;
+          padding-top: 10px !important;
+          padding-bottom: 10px !important;
+        }
+        .quotation-grid .ant-table-tbody > tr > td {
+          padding-top: 12px !important;
+          padding-bottom: 12px !important;
+          border-bottom: 1px solid #eef2f7;
+          vertical-align: top;
+        }
+        .quotation-grid .ant-table-tbody > tr:hover > td {
+          background: #f8fbff !important;
+        }
+      `}</style>
+
       <Table
         dataSource={visibleRows}
         columns={columns}
         loading={loading && !hasCache}
         size="small"
-        className="compact-table"
+        className="compact-table quotation-grid"
         scroll={isMobile ? { x: 'max-content', y: tableHeight } : { y: tableHeight }}
         tableLayout={isMobile ? "auto" : "fixed"}
         pagination={USE_SERVER_PAG ? {

@@ -163,6 +163,22 @@ const DEFAULT_FREE_FITTINGS_SELECTED = Object.freeze([
   "Floor Mat",
   "ISI Helmet",
 ]);
+const DEFAULT_OWNER_LABOUR_CATALOG = Object.freeze({
+  scooterBase: Object.freeze([
+    { desc: "Engine oil", rate: 450 },
+    { desc: "Consumables", rate: 70 },
+    { desc: "Gearbox oil", rate: 80 },
+  ]),
+  motorcycleBase: Object.freeze([
+    { desc: "Engine oil", rate: 450 },
+    { desc: "Consumables", rate: 80 },
+    { desc: "Chain lubrication", rate: 70 },
+  ]),
+  paidAddons: Object.freeze([
+    { desc: "Service Labour", rate: 400 },
+    { desc: "Water wash", rate: 150 },
+  ]),
+});
 
 const toTrimmed = (value) => String(value || "").trim();
 const normalizeLines = (value) => {
@@ -240,6 +256,60 @@ export const normalizeOwnerFreeFittingsConfig = (raw = {}) => {
   return { options: finalOptions, defaultSelected: finalDefaults };
 };
 
+const parseOwnerLabourRow = (item) => {
+  if (!item) return null;
+  if (typeof item === "object") {
+    const desc = String(item.desc || item.name || "").trim();
+    const rateNum = Number(item.rate);
+    return desc
+      ? { desc, rate: Number.isFinite(rateNum) && rateNum >= 0 ? rateNum : 0 }
+      : null;
+  }
+  const text = String(item || "").trim();
+  if (!text) return null;
+  const pipeParts = text.split("|");
+  if (pipeParts.length >= 2) {
+    const desc = String(pipeParts[0] || "").trim();
+    const rateNum = Number(String(pipeParts.slice(1).join("|") || "").replace(/[^\d.]/g, ""));
+    return desc
+      ? { desc, rate: Number.isFinite(rateNum) && rateNum >= 0 ? rateNum : 0 }
+      : null;
+  }
+  return { desc: text, rate: 0 };
+};
+
+const normalizeOwnerLabourList = (rawList, fallbackList) => {
+  const seen = new Set();
+  const next = (Array.isArray(rawList) ? rawList : [])
+    .map(parseOwnerLabourRow)
+    .filter(Boolean)
+    .filter((item) => {
+      const key = String(item.desc || "").trim().toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return next.length
+    ? next
+    : fallbackList.map((item) => ({ desc: String(item.desc || "").trim(), rate: Number(item.rate || 0) }));
+};
+
+export const normalizeOwnerLabourConfig = (raw = {}) => {
+  const scooterBase = normalizeOwnerLabourList(
+    raw?.scooterBase ?? raw?.labourScooterBase,
+    DEFAULT_OWNER_LABOUR_CATALOG.scooterBase
+  );
+  const motorcycleBase = normalizeOwnerLabourList(
+    raw?.motorcycleBase ?? raw?.labourMotorcycleBase,
+    DEFAULT_OWNER_LABOUR_CATALOG.motorcycleBase
+  );
+  const paidAddons = normalizeOwnerLabourList(
+    raw?.paidAddons ?? raw?.labourPaidAddons,
+    DEFAULT_OWNER_LABOUR_CATALOG.paidAddons
+  );
+  return { scooterBase, motorcycleBase, paidAddons };
+};
+
 export const getOwnerConfig = () => {
   const u = readLocalUser();
   const role = String(u?.role || "").trim().toLowerCase();
@@ -315,6 +385,15 @@ export const getOwnerFreeFittingsConfig = () => {
   });
 };
 
+export const getOwnerLabourConfig = () => {
+  const cfg = getOwnerConfig();
+  return normalizeOwnerLabourConfig({
+    labourScooterBase: cfg?.labourScooterBase,
+    labourMotorcycleBase: cfg?.labourMotorcycleBase,
+    labourPaidAddons: cfg?.labourPaidAddons,
+  });
+};
+
 export const getOwnerLimits = () => {
   const u = readLocalUser();
   return u?.ownerLimits || u?.metadata?.ownerLimits || {};
@@ -332,6 +411,8 @@ export const getOwnerWebhookUrl = () => {
   if (/^script\.google\.com\/macros\/s\//i.test(raw)) raw = `https://${raw}`; // missing scheme
   return raw;
 };
+
+export const hasOwnerWebhookUrlConfigured = () => Boolean(getOwnerWebhookUrl());
 
 export const getOwnerLogoUrl = () => {
   const cfg = getOwnerConfig();

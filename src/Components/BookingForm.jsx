@@ -29,6 +29,7 @@ import { listUsersPublic } from "../apiCalls/adminUsers";
 import BookingPrintSheet from "./BookingPrintSheet";
 import FetchBooking from "./FetchBooking";
 import BookingHistoryButton from "./BookingHistoryButton";
+import DashboardQuickNav from "./DashboardQuickNav";
 import { handleSmartPrint } from "../utils/printUtils";
 import { normalizeKey, uniqCaseInsensitive } from "../utils/caseInsensitive";
 import dayjs from "dayjs";
@@ -2455,12 +2456,13 @@ export default function BookingForm({
           <Spin tip="Fetching booking details..." size="large" />
         </div>
       )}
+      <DashboardQuickNav currentLabel="Booking Form" />
       <Card
         bordered={false}
         style={{
           width: "100%",
-          maxWidth: 920,
-          margin: isMobile ? "8px auto 24dvh" : "16px auto",
+          maxWidth: "100%",
+          margin: isMobile ? "8px 0 24dvh" : "16px 0",
           borderRadius: 16,
           boxShadow:
             "0 10px 30px rgba(37, 99, 235, 0.10), 0 2px 8px rgba(0,0,0,0.06)",

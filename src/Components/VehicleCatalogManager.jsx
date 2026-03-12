@@ -27,6 +27,45 @@ const appendQuery = (url, params = {}) => {
   return `${url}${url.includes('?') ? '&' : '?'}${q}`
 }
 
+const tokenizeColors = (value = '') => {
+  if (Array.isArray(value)) {
+    return value
+      .flatMap((item) =>
+        String(item || '')
+          .toUpperCase()
+          .replace(/[，;]+/g, ',')
+          .replace(/[\n\r]+/g, ',')
+          .split(/[,\/|]+/)
+          .map((v) => v.trim())
+          .filter(Boolean)
+      )
+  }
+  const source = value
+  const raw = String(source || '').toUpperCase().trim()
+  if (!raw) return []
+  const normalized = raw
+    .replace(/[，;]+/g, ',')
+    .replace(/[\n\r]+/g, ',')
+    .replace(/\s*([,\/|])\s*/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const hasExplicitSeparators = /[,\/|]/.test(normalized)
+  if (hasExplicitSeparators) {
+    return normalized
+      .split(/[,\/|]+/)
+      .map((v) => v.trim())
+      .filter(Boolean)
+  }
+  const words = normalized.split(' ').filter(Boolean)
+  if (words.length >= 3) return words
+  return normalized ? [normalized] : []
+}
+
+const normalizeColorInput = (value = '') => {
+  const deduped = Array.from(new Set(tokenizeColors(value)))
+  return deduped.join(', ')
+}
+
 const normalizeRow = (row = {}) => {
   const rawPrice =
     pick(row, HEADERS.price) ||
@@ -165,7 +204,7 @@ export default function VehicleCatalogManager() {
       company: record.company,
       model: record.model,
       variant: record.variant,
-      color: record.color,
+      color: tokenizeColors(record.color),
       onRoadPrice: record.onRoadPrice,
     })
     setModalOpen(true)
@@ -215,6 +254,11 @@ export default function VehicleCatalogManager() {
     const set = new Set(rows.map((r) => norm(r.company)).filter(Boolean))
     return Array.from(set).map((c) => ({ value: c, label: (c || '').toUpperCase() })).sort((a, b) => a.label.localeCompare(b.label))
   }, [rows])
+  const colorTagOptions = useMemo(() => {
+    const uniq = new Set()
+    rows.forEach((r) => tokenizeColors(r.color).forEach((c) => uniq.add(c)))
+    return Array.from(uniq).sort((a, b) => a.localeCompare(b)).map((c) => ({ value: c, label: c }))
+  }, [rows])
 
   const handleSubmit = async () => {
     try {
@@ -223,7 +267,7 @@ export default function VehicleCatalogManager() {
       ;['company','model','variant'].forEach((k) => {
         if (values[k]) values[k] = String(values[k]).toUpperCase()
       })
-      if (values.color) values.color = String(values.color).toUpperCase().trim()
+      values.color = normalizeColorInput(values.color)
       setSaving(true)
       const payload = {
         ...values,
@@ -410,12 +454,14 @@ export default function VehicleCatalogManager() {
           <Form.Item name="variant" label="Variant" rules={[{ required: true, message: 'Enter variant' }]}>
             <Input placeholder="e.g., DISC" allowClear style={{ textTransform: 'uppercase' }} onChange={(e) => form.setFieldsValue({ variant: (e.target.value || '').toUpperCase() })} />
           </Form.Item>
-          <Form.Item name="color" label="Colors (comma-separated)">
-            <Input
-              placeholder="e.g., RED, BLACK, BLUE"
+          <Form.Item name="color" label="Colors">
+            <Select
+              mode="tags"
               allowClear
-              style={{ textTransform: 'uppercase' }}
-              onChange={(e) => form.setFieldsValue({ color: (e.target.value || '').toUpperCase() })}
+              tokenSeparators={[',', '/', '|']}
+              placeholder="Type color and press Enter (or use comma)"
+              options={colorTagOptions}
+              onChange={(vals) => form.setFieldsValue({ color: tokenizeColors(vals) })}
             />
           </Form.Item>
           <Form.Item name="onRoadPrice" label="On-Road Price (₹)" rules={[{ required: true, message: 'Enter price' }]}>

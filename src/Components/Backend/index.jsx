@@ -1,5 +1,6 @@
 import React from 'react'
 import { Tabs, Grid } from 'antd'
+import { useSearchParams } from 'react-router-dom'
 import InStockUpdate from '../InStockUpdate'
 import Branches from '../Admin/Branches'
 import StockUpdate from '../StockUpdate'
@@ -15,10 +16,11 @@ import VehicleCatalogManager from '../VehicleCatalogManager'
 
 // Owner dashboard: Analytics & Reports in tabs
 export default function Backend() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const screens = Grid.useBreakpoint()
   const isMobile = !screens.md
   const styles = {
-    wrap: { maxWidth: 1200, margin: '0 auto', padding: isMobile ? 12 : 16 },
+    wrap: { width: '100%', maxWidth: '100%', margin: 0, padding: isMobile ? 12 : 16 },
     h1: { fontSize: 28, marginBottom: 4 },
     sub: { color: '#6b7280', marginBottom: 16 },
     panel: { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 16 },
@@ -50,12 +52,20 @@ export default function Backend() {
     { key: 'announcements', label: (<><style>{`@keyframes annPulse{0%{transform:scale(1);}60%{transform:scale(1.05);}100%{transform:scale(1);}}`}</style><span>Announcements<NewPill/></span></>), children: <Announcements /> },
     
   ]
+  const validTabKeys = React.useMemo(() => items.map((it) => it.key), [items])
+  const requestedTab = searchParams.get('tab')
+  const activeTab = validTabKeys.includes(requestedTab) ? requestedTab : 'quotations'
 
   return (
     <div style={styles.wrap}>
       
       <Tabs
-        defaultActiveKey="quotations"
+        activeKey={activeTab}
+        onChange={(key) => {
+          const next = new URLSearchParams(searchParams)
+          next.set('tab', key)
+          setSearchParams(next, { replace: true })
+        }}
         items={items}
         animated
         size={isMobile ? 'small' : 'middle'}

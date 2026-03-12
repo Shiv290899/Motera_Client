@@ -812,8 +812,8 @@ export default function VehicleSearch() {
     <div
       style={{
         padding: isMobile ? 12 : 24,
-        maxWidth: 1200,
-        margin: isMobile ? "12px auto" : "24px auto",
+        maxWidth: "100%",
+        margin: isMobile ? "12px 0" : "24px 0",
         borderRadius: isMobile ? 16 : 24,
         background: "radial-gradient(circle at top, #0f172a 0%, #020617 40%, #020617 100%)",
         boxShadow: "0 24px 60px rgba(15, 23, 42, 0.8)",

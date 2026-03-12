@@ -10,11 +10,9 @@ export default function StaffAccountCard() {
   const navigate = useNavigate();
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
-  const DEFAULT_JC_URL = 'https://script.google.com/macros/s/AKfycbz_DoNoD0XTx3RNMOSZfypbMqWVN4yTy3ct96aE4LhJ9yb_YvKr0GRbO_GA3Fgkwptb/exec?module=jobcard';
-  const GAS_URL = resolveUnifiedGasUrl('jobcard', import.meta.env.VITE_JOBCARD_GAS_URL || DEFAULT_JC_URL);
+  const GAS_URL = resolveUnifiedGasUrl('jobcard');
   const SECRET = import.meta.env.VITE_JOBCARD_GAS_SECRET || '';
-  const DEFAULT_BOOKING_URL = 'https://script.google.com/macros/s/AKfycbz_DoNoD0XTx3RNMOSZfypbMqWVN4yTy3ct96aE4LhJ9yb_YvKr0GRbO_GA3Fgkwptb/exec?module=booking';
-  const BOOKING_GAS_URL = resolveUnifiedGasUrl('booking', import.meta.env.VITE_BOOKING_GAS_URL || DEFAULT_BOOKING_URL);
+  const BOOKING_GAS_URL = resolveUnifiedGasUrl('booking');
   const BOOKING_SECRET = import.meta.env.VITE_BOOKING_GAS_SECRET || '';
 
   const [data, setData] = useState({ bookingAmountPending:0, jcAmountPending:0, minorSalesAmountPending:0, totalPending:0, prevDueAssigned:0 });
@@ -39,6 +37,11 @@ export default function StaffAccountCard() {
 
   // Seed UI from last cached summary (instant paint)
   useEffect(() => {
+    if (!GAS_URL) {
+      setData({ bookingAmountPending:0, jcAmountPending:0, minorSalesAmountPending:0, totalPending:0, prevDueAssigned:0 });
+      setHasCache(false);
+      return;
+    }
     try {
       const raw = localStorage.getItem(CACHE_KEY);
       if (raw) {
@@ -64,7 +67,14 @@ export default function StaffAccountCard() {
   };
 
   const load = async () => {
-    if (!GAS_URL || !branch || !staff) return;
+    if (!GAS_URL || !branch || !staff) {
+      setData({ bookingAmountPending:0, jcAmountPending:0, minorSalesAmountPending:0, totalPending:0, prevDueAssigned:0 });
+      setTxRows([]);
+      setTxCache({ all: [], cash: [], online: [], loaded: false });
+      setPendingServiceRows([]);
+      setPendingSalesRows([]);
+      return;
+    }
     setLoading(true);
     try {
       // Fetch summary + full transaction list in parallel for faster first paint.
@@ -309,7 +319,11 @@ export default function StaffAccountCard() {
   };
 
   const loadPendingSummary = async () => {
-    if (!branch) return;
+    if (!branch || !GAS_URL || !BOOKING_GAS_URL) {
+      setPendingServiceRows([]);
+      setPendingSalesRows([]);
+      return;
+    }
     setPendingLoading(true);
     try {
       const [jobcards, bookings] = await Promise.all([

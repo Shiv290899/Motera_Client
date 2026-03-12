@@ -1,11 +1,27 @@
 /* Unified Google Apps Script (GAS) Router */
 
-// Set this to your single master spreadsheet ID to use one file for all modules.
-// If left blank, modules will use their own IDs or the active spreadsheet (if bound).
-const MASTER_SPREADSHEET_ID = '';
+// Optional manual override. Keep '' to auto-use the spreadsheet where this script is bound.
+const MANUAL_MASTER_SPREADSHEET_ID = '';
 
-// Optional: override the DailyCollections master spreadsheet used by Booking/JobCard/MinorSales.
+function getBoundSpreadsheetId_() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    return ss ? ss.getId() : '';
+  } catch (err) {
+    return '';
+  }
+}
+
+// Single master spreadsheet for all modules.
+// If bound to a Sheet, this auto-resolves that Sheet ID.
+const MASTER_SPREADSHEET_ID = MANUAL_MASTER_SPREADSHEET_ID || getBoundSpreadsheetId_();
+
+// Optional manual override for DailyCollections.
+// Keep '' to reuse MASTER_SPREADSHEET_ID.
 const MASTER_DAILY_COLLECTIONS_ID = '';
+
+// Drive folder for uploaded images/files. Edit only this value when folder changes.
+const MASTER_DRIVE_FOLDER_ID = '1H1CY5SxVfa9mVooMClHTDByw3MCJtRN5';
 
 const MODULE_ALIASES = {
   booking: ['booking', 'bookings'],
@@ -171,7 +187,7 @@ function doGet(e) {
 
 const SHEET_NAME = 'Bookings';
 const SPREADSHEET_ID = MASTER_SPREADSHEET_ID || ''; // leave '' if bound to spreadsheet
-const DRIVE_FOLDER_ID = '1H1CY5SxVfa9mVooMClHTDByw3MCJtRN5';
+const DRIVE_FOLDER_ID = MASTER_DRIVE_FOLDER_ID;
 
 const READ_SECRET = '';  // optional
 const WRITE_SECRET = ''; // optional
@@ -195,7 +211,7 @@ const HEADERS = [
 ];
 
 // 🔴 Master DailyCollections spreadsheet (one for all modules)
-const DC_MASTER_SPREADSHEET_ID = MASTER_DAILY_COLLECTIONS_ID ;
+const DC_MASTER_SPREADSHEET_ID = MASTER_DAILY_COLLECTIONS_ID || MASTER_SPREADSHEET_ID;
 
 // ===================== CREATE / UPDATE =====================
 
@@ -1662,7 +1678,7 @@ const BranchesModule = (() => {
 // - Deploy as a web app with "Anyone with the link" access
 // - Configure SHEET_ID + optional API_KEY for auth
 
-const SHEET_ID = MASTER_SPREADSHEET_ID || 'PUT_SPREADSHEET_ID_HERE'
+const SHEET_ID = MASTER_SPREADSHEET_ID || ''
 const SHEET_NAME = 'branches'
 const API_KEY = 'OPTIONAL_SECRET_KEY'
 
@@ -2116,7 +2132,7 @@ const SERVICE_HISTORY_HEADERS = [
 ];
 
 /* ============== DAILY COLLECTIONS (MASTER) CONFIG ============== */
-const DC_MASTER_SPREADSHEET_ID = MASTER_DAILY_COLLECTIONS_ID || '1oYOaFhEr7PgdF0BDC5A4V2zfPPoFtnhbxcP16jMqiGs';
+const DC_MASTER_SPREADSHEET_ID = MASTER_DAILY_COLLECTIONS_ID || MASTER_SPREADSHEET_ID;
 const DC_SHEET = 'DailyCollections';
 
 const DC_HEADERS = [
@@ -4667,7 +4683,7 @@ const HEADERS = [
 /* ============== DAILY COLLECTIONS (JC / Booking / Minor Sales) ============== */
 
 // 👇 Master DailyCollections spreadsheet – SAME as JC script
-const DC_MASTER_SPREADSHEET_ID = MASTER_DAILY_COLLECTIONS_ID || '1oYOaFhEr7PgdF0BDC5A4V2zfPPoFtnhbxcP16jMqiGs';
+const DC_MASTER_SPREADSHEET_ID = MASTER_DAILY_COLLECTIONS_ID || MASTER_SPREADSHEET_ID;
 
 const DC_SHEET = 'DailyCollections';
 const DC_HEADERS = [
